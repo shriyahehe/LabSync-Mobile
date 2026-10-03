@@ -18,6 +18,7 @@ func main() {
 	// Register API routes
 	routes.LaboratoryRoutes(app)
 	routes.MaterialRoutes(app)
+	routes.InventoryTransactionRoutes(app)
 
 	// Home route
 	app.Get("/", func(c fiber.Ctx) error {
