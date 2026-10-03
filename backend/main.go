@@ -20,6 +20,7 @@ func main() {
 	routes.MaterialRoutes(app)
 	routes.InventoryTransactionRoutes(app)
 	routes.EquipmentRoutes(app)
+	routes.EquipmentTransactionRoutes(app)
 
 	// Home route
 	app.Get("/", func(c fiber.Ctx) error {

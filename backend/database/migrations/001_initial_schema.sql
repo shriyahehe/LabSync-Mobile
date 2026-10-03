@@ -94,3 +94,29 @@ CREATE TABLE IF NOT EXISTS equipment (
         REFERENCES laboratories(id)
         ON DELETE CASCADE
 );
+-- ============================================
+-- 5. EQUIPMENT TRANSACTIONS
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS equipment_transactions (
+    id SERIAL PRIMARY KEY,
+
+    equipment_id INTEGER NOT NULL,
+
+    transaction_type VARCHAR(30) NOT NULL,
+
+    performed_by VARCHAR(150),
+
+    notes TEXT,
+
+    checkout_time TIMESTAMP,
+
+    return_time TIMESTAMP,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_equipment_transaction_equipment
+        FOREIGN KEY (equipment_id)
+        REFERENCES equipment(id)
+        ON DELETE CASCADE
+);
