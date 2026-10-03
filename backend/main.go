@@ -10,7 +10,6 @@ import (
 )
 
 func main() {
-
 	// Connect to PostgreSQL
 	database.Connect()
 
@@ -18,6 +17,7 @@ func main() {
 
 	// Register API routes
 	routes.LaboratoryRoutes(app)
+	routes.MaterialRoutes(app)
 
 	// Home route
 	app.Get("/", func(c fiber.Ctx) error {
