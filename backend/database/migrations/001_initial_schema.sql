@@ -67,3 +67,30 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
         REFERENCES materials(id)
         ON DELETE CASCADE
 );
+-- ============================================
+-- 4. EQUIPMENT
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS equipment (
+    id SERIAL PRIMARY KEY,
+
+    laboratory_id INTEGER NOT NULL,
+
+    name VARCHAR(150) NOT NULL,
+    category VARCHAR(100),
+
+    serial_number VARCHAR(100),
+
+    status VARCHAR(30) NOT NULL DEFAULT 'AVAILABLE',
+
+    location VARCHAR(150),
+
+    description TEXT,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_equipment_laboratory
+        FOREIGN KEY (laboratory_id)
+        REFERENCES laboratories(id)
+        ON DELETE CASCADE
+);
