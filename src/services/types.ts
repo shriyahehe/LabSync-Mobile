@@ -163,3 +163,21 @@ export interface CreateExperimentRecordInput {
   record_type: string;
   notes: string;
 }
+// ---------- Lab Entry Records ----------
+
+export interface LabEntry {
+  id: number;
+  laboratory_id: number;
+  laboratory_name?: string;
+  researcher_name: string;
+  check_in: string;
+  check_out: string | null;
+  notes: string;
+  created_at: string;
+}
+
+export interface CreateLabEntryInput {
+  laboratory_id: number;
+  researcher_name: string;
+  notes: string;
+}

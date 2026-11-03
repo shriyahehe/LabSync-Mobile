@@ -1,24 +1,27 @@
+
 import { router } from 'expo-router'
 import {
-    BarChart3,
-    Beaker,
-    ChevronRight,
-    ClipboardList,
-    FileSpreadsheet,
-    FlaskConical,
-    Package,
-    Settings,
-    ShieldCheck,
-    Users,
-    Wrench,
+  BarChart3,
+  Beaker,
+  ChevronRight,
+  ClipboardList,
+  Clock,
+  FileSpreadsheet,
+  FlaskConical,
+  Package,
+  Settings,
+  ShieldCheck,
+  Users,
+  Wrench,
 } from 'lucide-react-native'
+
 import {
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native'
 
 const COLORS = {
@@ -39,6 +42,12 @@ const menu = [
     description: 'Chemicals, reagents and stock levels',
     icon: FlaskConical,
     route: '/materials',
+  },
+  {
+    title: 'Lab Entry Records',
+    description: 'Researcher check-in, check-out and attendance',
+    icon: Clock,
+    route: '/lab-entry',
   },
   {
     title: 'Procurement',
@@ -89,7 +98,7 @@ export default function MoreScreen() {
 
         <View style={styles.rule} />
 
-        {/* RECORDS */}
+        {/* LABORATORY RECORDS */}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionNumber}>01</Text>
@@ -107,6 +116,7 @@ export default function MoreScreen() {
               <View key={item.title}>
                 <TouchableOpacity
                   style={styles.menuItem}
+                  activeOpacity={0.7}
                   onPress={() => router.push(item.route as any)}
                 >
                   <View style={styles.iconBox}>

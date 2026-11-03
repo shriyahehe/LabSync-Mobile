@@ -13,7 +13,7 @@ var DB *pgxpool.Pool
 
 // Connect initializes and verifies the PostgreSQL connection pool.
 func Connect() error {
-	connectionString := "postgres://localhost/labsync"
+	connectionString := "postgres://postgres:iu16051993@localhost:5432/labsync?sslmode=disable"
 
 	config, err := pgxpool.ParseConfig(connectionString)
 	if err != nil {
