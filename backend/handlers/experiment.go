@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,8 @@ func GetExperiments(c fiber.Ctx) error {
 		ORDER BY id DESC
 	`)
 	if err != nil {
+		log.Printf("GetExperiments database query error: %v", err)
+
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to fetch experiments",
 		})
@@ -55,6 +58,8 @@ func GetExperiments(c fiber.Ctx) error {
 			&experiment.CreatedAt,
 		)
 		if err != nil {
+			log.Printf("GetExperiments row scan error: %v", err)
+
 			return c.Status(500).JSON(fiber.Map{
 				"error": "Failed to read experiment data",
 			})
@@ -64,6 +69,8 @@ func GetExperiments(c fiber.Ctx) error {
 	}
 
 	if err := rows.Err(); err != nil {
+		log.Printf("GetExperiments rows iteration error: %v", err)
+
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Error while reading experiments",
 		})
