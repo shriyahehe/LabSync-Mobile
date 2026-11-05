@@ -2,9 +2,13 @@ package handlers
 
 import (
 	"context"
+	"errors"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/jackc/pgx/v5"
 
 	"labsync/backend/database"
 	"labsync/backend/models"
@@ -12,8 +16,14 @@ import (
 
 // GetInventoryTransactions returns all inventory transactions.
 func GetInventoryTransactions(c fiber.Ctx) error {
-	rows, err := database.DB.Query(
+	ctx, cancel := context.WithTimeout(
 		context.Background(),
+		10*time.Second,
+	)
+	defer cancel()
+
+	rows, err := database.DB.Query(
+		ctx,
 		`SELECT id,
 		        material_id,
 		        transaction_type,
@@ -38,7 +48,7 @@ func GetInventoryTransactions(c fiber.Ctx) error {
 	for rows.Next() {
 		var transaction models.InventoryTransaction
 
-		err := rows.Scan(
+		if err := rows.Scan(
 			&transaction.ID,
 			&transaction.MaterialID,
 			&transaction.TransactionType,
@@ -46,9 +56,7 @@ func GetInventoryTransactions(c fiber.Ctx) error {
 			&transaction.PerformedBy,
 			&transaction.Notes,
 			&transaction.CreatedAt,
-		)
-
-		if err != nil {
+		); err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"error": "Failed to read transaction data",
 			})
@@ -70,26 +78,29 @@ func GetInventoryTransactions(c fiber.Ctx) error {
 func CreateInventoryTransaction(c fiber.Ctx) error {
 	var transaction models.InventoryTransaction
 
-	// Read JSON request body
 	if err := c.Bind().Body(&transaction); err != nil {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Invalid request body",
 		})
 	}
 
-	// Basic validation
+	// Validate material ID.
 	if transaction.MaterialID <= 0 {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Material ID is required",
 		})
 	}
 
-	if transaction.Quantity <= 0 {
+	// Validate quantity.
+	if transaction.Quantity <= 0 ||
+		math.IsNaN(transaction.Quantity) ||
+		math.IsInf(transaction.Quantity, 0) {
 		return c.Status(400).JSON(fiber.Map{
-			"error": "Transaction quantity must be greater than zero",
+			"error": "Transaction quantity must be a valid positive number",
 		})
 	}
 
+	// Normalize transaction type.
 	transaction.TransactionType = strings.ToUpper(
 		strings.TrimSpace(transaction.TransactionType),
 	)
@@ -101,42 +112,14 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	// Check material exists and get current quantity.
-	var currentQuantity float64
-
-	err := database.DB.QueryRow(
+	ctx, cancel := context.WithTimeout(
 		context.Background(),
-		`SELECT quantity
-		 FROM materials
-		 WHERE id = $1`,
-		transaction.MaterialID,
-	).Scan(&currentQuantity)
+		10*time.Second,
+	)
+	defer cancel()
 
-	if err != nil {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Material not found",
-		})
-	}
-
-	// Prevent using more material than available.
-	if transaction.TransactionType == "USE" &&
-		transaction.Quantity > currentQuantity {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Insufficient material quantity",
-		})
-	}
-
-	// Calculate new quantity.
-	newQuantity := currentQuantity
-
-	if transaction.TransactionType == "USE" {
-		newQuantity -= transaction.Quantity
-	} else {
-		newQuantity += transaction.Quantity
-	}
-
-	// Start transaction.
-	tx, err := database.DB.Begin(context.Background())
+	// Start database transaction BEFORE reading stock.
+	tx, err := database.DB.Begin(ctx)
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -144,9 +127,60 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 		})
 	}
 
+	// Always attempt rollback unless the transaction has committed.
+	defer tx.Rollback(ctx)
+
+	// Lock the material row.
+	// Concurrent transactions must wait until this transaction finishes.
+	var currentQuantity float64
+
+	err = tx.QueryRow(
+		ctx,
+		`SELECT quantity
+		 FROM materials
+		 WHERE id = $1
+		 FOR UPDATE`,
+		transaction.MaterialID,
+	).Scan(&currentQuantity)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Material not found",
+		})
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to retrieve and lock material stock",
+		})
+	}
+
+	// Prevent stock from becoming negative.
+	if transaction.TransactionType == "USE" &&
+		transaction.Quantity > currentQuantity {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Insufficient material quantity",
+		})
+	}
+
+	// Calculate updated stock while holding the row lock.
+	newQuantity := currentQuantity
+
+	if transaction.TransactionType == "USE" {
+		newQuantity -= transaction.Quantity
+	} else {
+		newQuantity += transaction.Quantity
+
+		if math.IsInf(newQuantity, 0) {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Updated material quantity is too large",
+			})
+		}
+	}
+
 	// Update material quantity.
 	_, err = tx.Exec(
-		context.Background(),
+		ctx,
 		`UPDATE materials
 		 SET quantity = $1
 		 WHERE id = $2`,
@@ -155,8 +189,6 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 	)
 
 	if err != nil {
-		tx.Rollback(context.Background())
-
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to update material quantity",
 		})
@@ -164,7 +196,7 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 
 	// Insert transaction history.
 	err = tx.QueryRow(
-		context.Background(),
+		ctx,
 		`INSERT INTO inventory_transactions
 			(material_id, transaction_type, quantity, performed_by, notes)
 		 VALUES ($1, $2, $3, $4, $5)
@@ -180,15 +212,13 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 	)
 
 	if err != nil {
-		tx.Rollback(context.Background())
-
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to create inventory transaction",
 		})
 	}
 
-	// Commit database transaction.
-	if err := tx.Commit(context.Background()); err != nil {
+	// Commit both stock update and history together.
+	if err := tx.Commit(ctx); err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to save inventory transaction",
 		})
