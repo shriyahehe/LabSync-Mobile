@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func GetSample(c fiber.Ctx) error {
 		&sample.CreatedAt,
 	)
 
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return c.Status(404).JSON(fiber.Map{"error": "Sample not found"})
 	}
 	if err != nil {
@@ -121,7 +122,9 @@ func CreateSample(c fiber.Ctx) error {
 	if math.IsNaN(sample.InitialQuantity) ||
 		math.IsInf(sample.InitialQuantity, 0) ||
 		sample.InitialQuantity < 0 {
-		return c.Status(400).JSON(fiber.Map{"error": "Initial quantity must be a valid non-negative number"})
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Initial quantity must be a valid non-negative number",
+		})
 	}
 
 	sample.AvailableQuantity = sample.InitialQuantity
@@ -160,12 +163,14 @@ func GetSampleTransactions(c fiber.Ctx) error {
 
 	rows, err := database.DB.Query(ctx, `
 		SELECT id, sample_id, transaction_type, quantity,
-		       performed_by, notes, created_at
+		       researcher_id, performed_by, notes, created_at
 		FROM sample_transactions
 		ORDER BY created_at DESC
 	`)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch sample transactions"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to fetch sample transactions",
+		})
 	}
 	defer rows.Close()
 
@@ -179,18 +184,23 @@ func GetSampleTransactions(c fiber.Ctx) error {
 			&transaction.SampleID,
 			&transaction.TransactionType,
 			&transaction.Quantity,
+			&transaction.ResearcherID,
 			&transaction.PerformedBy,
 			&transaction.Notes,
 			&transaction.CreatedAt,
 		); err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "Failed to read sample transaction data"})
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to read sample transaction data",
+			})
 		}
 
 		transactions = append(transactions, transaction)
 	}
 
 	if err := rows.Err(); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed while reading sample transactions"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed while reading sample transactions",
+		})
 	}
 
 	return c.JSON(transactions)
@@ -207,10 +217,8 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 	transaction.TransactionType = strings.ToUpper(strings.TrimSpace(transaction.TransactionType))
 	transaction.PerformedBy = strings.TrimSpace(transaction.PerformedBy)
 
-	if transaction.SampleID <= 0 || transaction.PerformedBy == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Sample ID and performed by are required",
-		})
+	if transaction.SampleID <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Sample ID is required"})
 	}
 
 	if transaction.TransactionType != "USE" && transaction.TransactionType != "RESTOCK" {
@@ -236,6 +244,35 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 	}
 	defer tx.Rollback(ctx)
 
+	// Resolve the official researcher name when researcher_id is supplied.
+	if transaction.ResearcherID != nil {
+		if *transaction.ResearcherID <= 0 {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid researcher ID"})
+		}
+
+		err = tx.QueryRow(ctx, `
+			SELECT full_name
+			FROM researchers
+			WHERE id = $1 AND status = 'ACTIVE'
+		`, *transaction.ResearcherID).Scan(&transaction.PerformedBy)
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{
+				"error": "Active researcher not found",
+			})
+		}
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to verify researcher",
+			})
+		}
+	} else if transaction.PerformedBy == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Researcher ID or performed by name is required",
+		})
+	}
+
+	// Lock the sample row to prevent simultaneous quantity updates.
 	var currentQuantity float64
 
 	err = tx.QueryRow(ctx, `
@@ -245,19 +282,24 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 		FOR UPDATE
 	`, transaction.SampleID).Scan(&currentQuantity)
 
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return c.Status(404).JSON(fiber.Map{"error": "Sample not found"})
 	}
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to read sample quantity"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to read sample quantity",
+		})
 	}
 
 	newQuantity := currentQuantity
 
 	if transaction.TransactionType == "USE" {
 		if transaction.Quantity > currentQuantity {
-			return c.Status(400).JSON(fiber.Map{"error": "Insufficient sample quantity"})
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Insufficient sample quantity",
+			})
 		}
+
 		newQuantity -= transaction.Quantity
 	} else {
 		var initialQuantity float64
@@ -269,10 +311,13 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 		`, transaction.SampleID).Scan(&initialQuantity)
 
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "Failed to read initial sample quantity"})
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to read initial sample quantity",
+			})
 		}
 
 		newQuantity += transaction.Quantity
+
 		if math.IsInf(newQuantity, 0) || newQuantity > initialQuantity {
 			return c.Status(400).JSON(fiber.Map{
 				"error": "Restocking cannot exceed the initial sample quantity",
@@ -287,29 +332,37 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 	`, newQuantity, transaction.SampleID)
 
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to update sample quantity"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to update sample quantity",
+		})
 	}
 
 	err = tx.QueryRow(ctx, `
 		INSERT INTO sample_transactions (
-			sample_id, transaction_type, quantity, performed_by, notes
+			sample_id, transaction_type, quantity,
+			researcher_id, performed_by, notes
 		)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at
 	`,
 		transaction.SampleID,
 		transaction.TransactionType,
 		transaction.Quantity,
+		transaction.ResearcherID,
 		transaction.PerformedBy,
 		transaction.Notes,
 	).Scan(&transaction.ID, &transaction.CreatedAt)
 
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to save sample transaction"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to save sample transaction",
+		})
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to commit sample transaction"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to commit sample transaction",
+		})
 	}
 
 	return c.Status(201).JSON(fiber.Map{

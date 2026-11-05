@@ -18,6 +18,7 @@ type Sample struct {
 type SampleTransaction struct {
 	ID              int       `json:"id"`
 	SampleID        int       `json:"sample_id"`
+	ResearcherID    *int      `json:"researcher_id,omitempty"`
 	TransactionType string    `json:"transaction_type"`
 	Quantity        float64   `json:"quantity"`
 	PerformedBy     string    `json:"performed_by"`

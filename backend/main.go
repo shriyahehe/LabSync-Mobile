@@ -29,6 +29,7 @@ func main() {
 	routes.ExperimentRoutes(app)
 	routes.LabEntryRoutes(app)
 	routes.SampleRoutes(app)
+	routes.ResearcherRoutes(app)
 
 	// Home route.
 	app.Get("/", func(c fiber.Ctx) error {

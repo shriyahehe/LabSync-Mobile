@@ -13,14 +13,13 @@ import (
 	"labsync/backend/models"
 )
 
-// GetEquipmentTransactions returns equipment usage sessions.
 func GetEquipmentTransactions(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	rows, err := database.DB.Query(ctx, `
-		SELECT id, equipment_id, transaction_type, performed_by,
-		       notes, checkout_time, return_time, created_at
+		SELECT id, equipment_id, transaction_type, researcher_id,
+		       performed_by, notes, checkout_time, return_time, created_at
 		FROM equipment_transactions
 		ORDER BY created_at DESC
 	`)
@@ -40,6 +39,7 @@ func GetEquipmentTransactions(c fiber.Ctx) error {
 			&transaction.ID,
 			&transaction.EquipmentID,
 			&transaction.TransactionType,
+			&transaction.ResearcherID,
 			&transaction.PerformedBy,
 			&transaction.Notes,
 			&transaction.CheckoutTime,
@@ -63,7 +63,6 @@ func GetEquipmentTransactions(c fiber.Ctx) error {
 	return c.JSON(transactions)
 }
 
-// CreateEquipmentTransaction creates or completes an equipment usage session.
 func CreateEquipmentTransaction(c fiber.Ctx) error {
 	var request models.EquipmentTransaction
 
@@ -88,12 +87,6 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	if request.PerformedBy == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Performed by is required",
-		})
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -105,7 +98,37 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 	}
 	defer tx.Rollback(ctx)
 
-	// Lock the equipment row to prevent simultaneous checkout/return operations.
+	// Resolve the official researcher name when researcher_id is supplied.
+	if request.ResearcherID != nil {
+		if *request.ResearcherID <= 0 {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Invalid researcher ID",
+			})
+		}
+
+		err = tx.QueryRow(ctx, `
+			SELECT full_name
+			FROM researchers
+			WHERE id = $1 AND status = 'ACTIVE'
+		`, *request.ResearcherID).Scan(&request.PerformedBy)
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{
+				"error": "Active researcher not found",
+			})
+		}
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to verify researcher",
+			})
+		}
+	} else if request.PerformedBy == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Researcher ID or performed by name is required",
+		})
+	}
+
+	// Lock equipment to prevent simultaneous checkout/return operations.
 	var currentStatus string
 
 	err = tx.QueryRow(ctx, `
@@ -137,19 +160,15 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 		}
 
 		var transaction models.EquipmentTransaction
-		transaction.EquipmentID = request.EquipmentID
-		transaction.TransactionType = "CHECKOUT"
-		transaction.PerformedBy = request.PerformedBy
-		transaction.Notes = request.Notes
-		transaction.CheckoutTime = &now
 
 		err = tx.QueryRow(ctx, `
 			INSERT INTO equipment_transactions
-				(equipment_id, transaction_type, performed_by, notes, checkout_time)
-			VALUES ($1, 'CHECKOUT', $2, $3, $4)
+				(equipment_id, transaction_type, researcher_id, performed_by, notes, checkout_time)
+			VALUES ($1, 'CHECKOUT', $2, $3, $4, $5)
 			RETURNING id, created_at
 		`,
 			request.EquipmentID,
+			request.ResearcherID,
 			request.PerformedBy,
 			request.Notes,
 			now,
@@ -161,8 +180,17 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 			})
 		}
 
+		transaction.EquipmentID = request.EquipmentID
+		transaction.TransactionType = "CHECKOUT"
+		transaction.ResearcherID = request.ResearcherID
+		transaction.PerformedBy = request.PerformedBy
+		transaction.Notes = request.Notes
+		transaction.CheckoutTime = &now
+
 		_, err = tx.Exec(ctx, `
-			UPDATE equipment SET status = 'IN_USE' WHERE id = $1
+			UPDATE equipment
+			SET status = 'IN_USE'
+			WHERE id = $1
 		`, request.EquipmentID)
 
 		if err != nil {
@@ -180,7 +208,7 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 		return c.Status(201).JSON(transaction)
 	}
 
-	// RETURN: find the active checkout session.
+	// RETURN: find and lock the active checkout session.
 	if currentStatus != "IN_USE" {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Equipment is not currently in use",
@@ -190,8 +218,8 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 	var transaction models.EquipmentTransaction
 
 	err = tx.QueryRow(ctx, `
-		SELECT id, equipment_id, transaction_type, performed_by,
-		       notes, checkout_time, created_at
+		SELECT id, equipment_id, transaction_type, researcher_id,
+		       performed_by, notes, checkout_time, created_at
 		FROM equipment_transactions
 		WHERE equipment_id = $1
 		  AND transaction_type = 'CHECKOUT'
@@ -203,6 +231,7 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 		&transaction.ID,
 		&transaction.EquipmentID,
 		&transaction.TransactionType,
+		&transaction.ResearcherID,
 		&transaction.PerformedBy,
 		&transaction.Notes,
 		&transaction.CheckoutTime,
@@ -220,8 +249,16 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	// Only the researcher who checked out the equipment can return it.
-	if !strings.EqualFold(
+	// If the checkout has a researcher ID, require the same ID for return.
+	// Older checkout records without an ID use the name comparison.
+	if transaction.ResearcherID != nil {
+		if request.ResearcherID == nil ||
+			*request.ResearcherID != *transaction.ResearcherID {
+			return c.Status(403).JSON(fiber.Map{
+				"error": "Only the researcher who checked out this equipment can return it",
+			})
+		}
+	} else if !strings.EqualFold(
 		strings.TrimSpace(transaction.PerformedBy),
 		request.PerformedBy,
 	) {
@@ -243,7 +280,9 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 	}
 
 	_, err = tx.Exec(ctx, `
-		UPDATE equipment SET status = 'AVAILABLE' WHERE id = $1
+		UPDATE equipment
+		SET status = 'AVAILABLE'
+		WHERE id = $1
 	`, request.EquipmentID)
 
 	if err != nil {

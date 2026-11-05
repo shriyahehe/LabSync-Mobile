@@ -16,31 +16,20 @@ import (
 
 // GetInventoryTransactions returns all inventory transactions.
 func GetInventoryTransactions(c fiber.Ctx) error {
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
-		10*time.Second,
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	rows, err := database.DB.Query(
-		ctx,
-		`SELECT id,
-		        material_id,
-		        transaction_type,
-		        quantity,
-		        performed_by,
-		        notes,
-		        created_at
-		 FROM inventory_transactions
-		 ORDER BY created_at DESC`,
-	)
-
+	rows, err := database.DB.Query(ctx, `
+		SELECT id, material_id, transaction_type, quantity,
+		       researcher_id, performed_by, notes, created_at
+		FROM inventory_transactions
+		ORDER BY created_at DESC
+	`)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to fetch inventory transactions",
 		})
 	}
-
 	defer rows.Close()
 
 	transactions := make([]models.InventoryTransaction, 0)
@@ -53,6 +42,7 @@ func GetInventoryTransactions(c fiber.Ctx) error {
 			&transaction.MaterialID,
 			&transaction.TransactionType,
 			&transaction.Quantity,
+			&transaction.ResearcherID,
 			&transaction.PerformedBy,
 			&transaction.Notes,
 			&transaction.CreatedAt,
@@ -84,14 +74,12 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	// Validate material ID.
 	if transaction.MaterialID <= 0 {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Material ID is required",
 		})
 	}
 
-	// Validate quantity.
 	if transaction.Quantity <= 0 ||
 		math.IsNaN(transaction.Quantity) ||
 		math.IsInf(transaction.Quantity, 0) {
@@ -100,10 +88,10 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	// Normalize transaction type.
 	transaction.TransactionType = strings.ToUpper(
 		strings.TrimSpace(transaction.TransactionType),
 	)
+	transaction.PerformedBy = strings.TrimSpace(transaction.PerformedBy)
 
 	if transaction.TransactionType != "USE" &&
 		transaction.TransactionType != "RESTOCK" {
@@ -112,50 +100,68 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
-		10*time.Second,
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Start database transaction BEFORE reading stock.
 	tx, err := database.DB.Begin(ctx)
-
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to start database transaction",
 		})
 	}
-
-	// Always attempt rollback unless the transaction has committed.
 	defer tx.Rollback(ctx)
 
-	// Lock the material row.
-	// Concurrent transactions must wait until this transaction finishes.
+	// Resolve the official name from the active researcher profile.
+	if transaction.ResearcherID != nil {
+		if *transaction.ResearcherID <= 0 {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Invalid researcher ID",
+			})
+		}
+
+		err = tx.QueryRow(ctx, `
+			SELECT full_name
+			FROM researchers
+			WHERE id = $1 AND status = 'ACTIVE'
+		`, *transaction.ResearcherID).Scan(&transaction.PerformedBy)
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(404).JSON(fiber.Map{
+				"error": "Active researcher not found",
+			})
+		}
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to verify researcher",
+			})
+		}
+	} else if transaction.PerformedBy == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Researcher ID or performed by name is required",
+		})
+	}
+
+	// Lock the material row to prevent concurrent stock updates.
 	var currentQuantity float64
 
-	err = tx.QueryRow(
-		ctx,
-		`SELECT quantity
-		 FROM materials
-		 WHERE id = $1
-		 FOR UPDATE`,
-		transaction.MaterialID,
-	).Scan(&currentQuantity)
+	err = tx.QueryRow(ctx, `
+		SELECT quantity
+		FROM materials
+		WHERE id = $1
+		FOR UPDATE
+	`, transaction.MaterialID).Scan(&currentQuantity)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c.Status(404).JSON(fiber.Map{
 			"error": "Material not found",
 		})
 	}
-
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to retrieve and lock material stock",
 		})
 	}
 
-	// Prevent stock from becoming negative.
 	if transaction.TransactionType == "USE" &&
 		transaction.Quantity > currentQuantity {
 		return c.Status(400).JSON(fiber.Map{
@@ -163,7 +169,6 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	// Calculate updated stock while holding the row lock.
 	newQuantity := currentQuantity
 
 	if transaction.TransactionType == "USE" {
@@ -178,15 +183,11 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 		}
 	}
 
-	// Update material quantity.
-	_, err = tx.Exec(
-		ctx,
-		`UPDATE materials
-		 SET quantity = $1
-		 WHERE id = $2`,
-		newQuantity,
-		transaction.MaterialID,
-	)
+	_, err = tx.Exec(ctx, `
+		UPDATE materials
+		SET quantity = $1
+		WHERE id = $2
+	`, newQuantity, transaction.MaterialID)
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -194,22 +195,21 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	// Insert transaction history.
-	err = tx.QueryRow(
-		ctx,
-		`INSERT INTO inventory_transactions
-			(material_id, transaction_type, quantity, performed_by, notes)
-		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, created_at`,
+	err = tx.QueryRow(ctx, `
+		INSERT INTO inventory_transactions (
+			material_id, transaction_type, quantity,
+			researcher_id, performed_by, notes
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at
+	`,
 		transaction.MaterialID,
 		transaction.TransactionType,
 		transaction.Quantity,
+		transaction.ResearcherID,
 		transaction.PerformedBy,
 		transaction.Notes,
-	).Scan(
-		&transaction.ID,
-		&transaction.CreatedAt,
-	)
+	).Scan(&transaction.ID, &transaction.CreatedAt)
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -217,7 +217,6 @@ func CreateInventoryTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	// Commit both stock update and history together.
 	if err := tx.Commit(ctx); err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to save inventory transaction",
