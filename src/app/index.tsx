@@ -114,6 +114,19 @@ export default function HomeScreen() {
             <Text style={styles.greetingNote}>
               Here is the current state of your laboratory records.
             </Text>
+            <TouchableOpacity
+  onPress={() => router.push('/api-test' as any)}
+  style={{
+    marginTop: 12,
+    padding: 10,
+    backgroundColor: '#DCE9E3',
+    alignSelf: 'flex-start',
+  }}
+>
+  <Text style={{ color: '#176B63', fontWeight: '700' }}>
+    TEST BACKEND CONNECTION
+  </Text>
+</TouchableOpacity>
           </View>
 
           {/* SUMMARY */}

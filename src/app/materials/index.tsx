@@ -1,22 +1,40 @@
-import { router } from 'expo-router'
+
+import { router, useFocusEffect } from 'expo-router'
+
 import {
-    AlertTriangle,
-    ArrowLeft,
-    Beaker,
-    ChevronRight,
-    Filter,
-    Plus,
-    Search,
+  AlertTriangle,
+  ArrowLeft,
+  Beaker,
+  ChevronRight,
+  Filter,
+  Plus,
+  Search,
 } from 'lucide-react-native'
+
+import { useCallback, useMemo, useState } from 'react'
+
 import {
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native'
+
+import {
+  getLaboratories,
+  getMaterials,
+} from '@/services/api'
+
+import type {
+  Laboratory,
+  Material,
+} from '@/services/types'
 
 const COLORS = {
   background: '#F5F3EC',
@@ -32,55 +50,109 @@ const COLORS = {
   white: '#FFFFFF',
 }
 
-const materials = [
-  {
-    id: 'MAT-041',
-    name: 'Tris-HCl Buffer',
-    category: 'BUFFER',
-    lab: 'BIOCHEMISTRY',
-    stock: '850 mL',
-    status: 'IN STOCK',
-  },
-  {
-    id: 'MAT-038',
-    name: 'Agarose',
-    category: 'REAGENT',
-    lab: 'BIOTECHNOLOGY',
-    stock: '420 g',
-    status: 'IN STOCK',
-  },
-  {
-    id: 'MAT-027',
-    name: 'Ethanol 99.9%',
-    category: 'SOLVENT',
-    lab: 'COMMON STORE',
-    stock: '2.4 L',
-    status: 'IN STOCK',
-  },
-  {
-    id: 'MAT-019',
-    name: 'Copper Sulphate',
-    category: 'CHEMICAL',
-    lab: 'MATERIALS',
-    stock: '180 g',
-    status: 'LOW STOCK',
-  },
-  {
-    id: 'MAT-012',
-    name: 'Sodium Chloride',
-    category: 'CHEMICAL',
-    lab: 'BIOCHEMISTRY',
-    stock: '1.8 kg',
-    status: 'IN STOCK',
-  },
-]
-
 export default function MaterialsScreen() {
+  const [materials, setMaterials] = useState<Material[]>([])
+  const [laboratories, setLaboratories] = useState<Laboratory[]>([])
+  const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState('')
+  const [lowStockOnly, setLowStockOnly] = useState(false)
+
+  const loadData = useCallback(async () => {
+    try {
+      setError('')
+
+      const [materialData, laboratoryData] = await Promise.all([
+        getMaterials(),
+        getLaboratories(),
+      ])
+
+      setMaterials(materialData)
+      setLaboratories(laboratoryData)
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to load inventory.'
+      )
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData()
+    }, [loadData])
+  )
+
+  const laboratoryMap = useMemo(
+    () =>
+      new Map(
+        laboratories.map((lab) => [lab.id, lab])
+      ),
+    [laboratories]
+  )
+
+  const lowStockCount = materials.filter(
+    (material) =>
+      material.quantity <= material.minimum_quantity
+  ).length
+
+  const filteredMaterials = useMemo(() => {
+    const query = search.trim().toLowerCase()
+
+    return materials.filter((material) => {
+      const laboratory = laboratoryMap.get(
+        material.laboratory_id
+      )
+
+      const matchesSearch = [
+        material.name,
+        material.category,
+        material.unit,
+        laboratory?.name ?? '',
+        laboratory?.department ?? '',
+      ].some((value) =>
+        value.toLowerCase().includes(query)
+      )
+
+      const matchesStock =
+        !lowStockOnly ||
+        material.quantity <= material.minimum_quantity
+
+      return matchesSearch && matchesStock
+    })
+  }, [materials, laboratoryMap, search, lowStockOnly])
+
+  const onRefresh = () => {
+    setRefreshing(true)
+    loadData()
+  }
+
+  const formatQuantity = (quantity: number) =>
+    Number(quantity).toLocaleString('en-IN')
+
+  const getMaterialStatus = (material: Material) =>
+    material.quantity <= material.minimum_quantity
+      ? 'LOW STOCK'
+      : 'IN STOCK'
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.green}
+            colors={[COLORS.green]}
+          />
+        }
       >
         {/* HEADER */}
 
@@ -97,12 +169,22 @@ export default function MaterialsScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerText}>
-            <Text style={styles.eyebrow}>LABORATORY INVENTORY</Text>
+            <Text style={styles.eyebrow}>
+              LABORATORY INVENTORY
+            </Text>
 
             <Text style={styles.title}>Materials</Text>
           </View>
 
-          <TouchableOpacity style={styles.addButton}>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() =>
+              Alert.alert(
+                'Add Material',
+                'Material registration will be implemented in the next stage.'
+              )
+            }
+          >
             <Plus
               size={19}
               color={COLORS.white}
@@ -113,7 +195,7 @@ export default function MaterialsScreen() {
 
         <View style={styles.rule} />
 
-        {/* SEARCH */}
+        {/* SEARCH AND FILTER */}
 
         <View style={styles.searchRow}>
           <View style={styles.searchBox}>
@@ -127,42 +209,72 @@ export default function MaterialsScreen() {
               placeholder="Search materials..."
               placeholderTextColor={COLORS.muted}
               style={styles.searchInput}
+              value={search}
+              onChangeText={setSearch}
             />
           </View>
 
-          <TouchableOpacity style={styles.filterButton}>
+          <TouchableOpacity
+            style={[
+              styles.filterButton,
+              lowStockOnly && styles.filterButtonActive,
+            ]}
+            onPress={() => setLowStockOnly((current) => !current)}
+          >
             <Filter
               size={18}
-              color={COLORS.green}
+              color={
+                lowStockOnly
+                  ? COLORS.white
+                  : COLORS.green
+              }
               strokeWidth={1.7}
             />
           </TouchableOpacity>
         </View>
 
+        {lowStockOnly && (
+          <Text style={styles.filterHint}>
+            Showing low-stock materials only. Tap the filter to show all.
+          </Text>
+        )}
+
         {/* INVENTORY SUMMARY */}
 
         <View style={styles.summary}>
           <View>
-            <Text style={styles.summaryNumber}>31</Text>
-            <Text style={styles.summaryLabel}>MATERIALS</Text>
+            <Text style={styles.summaryNumber}>
+              {materials.length.toString().padStart(2, '0')}
+            </Text>
+            <Text style={styles.summaryLabel}>
+              MATERIALS
+            </Text>
           </View>
 
           <View style={styles.summaryDivider} />
 
           <View>
-            <Text style={styles.summaryNumber}>05</Text>
-            <Text style={styles.summaryLabel}>LOW STOCK</Text>
+            <Text style={styles.summaryNumber}>
+              {lowStockCount.toString().padStart(2, '0')}
+            </Text>
+            <Text style={styles.summaryLabel}>
+              LOW STOCK
+            </Text>
           </View>
 
           <View style={styles.summaryDivider} />
 
           <View>
-            <Text style={styles.summaryNumber}>03</Text>
-            <Text style={styles.summaryLabel}>ORDERS</Text>
+            <Text style={styles.summaryNumber}>
+              {laboratories.length.toString().padStart(2, '0')}
+            </Text>
+            <Text style={styles.summaryLabel}>
+              LABORATORIES
+            </Text>
           </View>
         </View>
 
-        {/* REGISTER */}
+        {/* MATERIAL REGISTER */}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionNumber}>01</Text>
@@ -172,109 +284,195 @@ export default function MaterialsScreen() {
           </Text>
         </View>
 
-        <View style={styles.list}>
-          {materials.map((material) => (
+        {/* LOADING */}
+
+        {loading && (
+          <View style={styles.stateContainer}>
+            <ActivityIndicator
+              size="large"
+              color={COLORS.green}
+            />
+            <Text style={styles.stateText}>
+              Loading laboratory inventory...
+            </Text>
+          </View>
+        )}
+
+        {/* ERROR */}
+
+        {!loading && !!error && (
+          <View style={styles.stateContainer}>
+            <AlertTriangle
+              size={25}
+              color={COLORS.brick}
+            />
+
+            <Text style={styles.errorText}>
+              {error}
+            </Text>
+
             <TouchableOpacity
-              key={material.id}
-              style={styles.card}
+              style={styles.retryButton}
+              onPress={() => {
+                setLoading(true)
+                loadData()
+              }}
             >
-              <View style={styles.cardTop}>
-                <View style={styles.idRow}>
-                  <Beaker
-                    size={16}
-                    color={COLORS.green}
-                    strokeWidth={1.6}
-                  />
+              <Text style={styles.retryText}>
+                Try Again
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-                  <Text style={styles.materialId}>
-                    {material.id}
-                  </Text>
-                </View>
+        {/* MATERIAL CARDS */}
 
-                <ChevronRight
-                  size={17}
+        {!loading && !error && (
+          <View style={styles.list}>
+            {filteredMaterials.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Beaker
+                  size={27}
                   color={COLORS.muted}
-                  strokeWidth={1.6}
                 />
-              </View>
 
-              <Text style={styles.materialName}>
-                {material.name}
+                <Text style={styles.emptyTitle}>
+                  No materials found
+                </Text>
+
+                <Text style={styles.emptyText}>
+                  {materials.length === 0
+                    ? 'No materials have been registered in the inventory yet.'
+                    : 'Try changing your search or stock filter.'}
+                </Text>
+              </View>
+            ) : (
+              filteredMaterials.map((material) => {
+                const laboratory = laboratoryMap.get(
+                  material.laboratory_id
+                )
+
+                const status = getMaterialStatus(material)
+                const isLowStock = status === 'LOW STOCK'
+
+                return (
+                  <View
+                    key={material.id}
+                    style={styles.card}
+                  >
+                    <View style={styles.cardTop}>
+                      <View style={styles.idRow}>
+                        <Beaker
+                          size={16}
+                          color={COLORS.green}
+                          strokeWidth={1.6}
+                        />
+
+                        <Text style={styles.materialId}>
+                          ID {material.id}
+                        </Text>
+                      </View>
+
+                      <ChevronRight
+                        size={17}
+                        color={COLORS.muted}
+                        strokeWidth={1.6}
+                      />
+                    </View>
+
+                    <Text style={styles.materialName}>
+                      {material.name}
+                    </Text>
+
+                    <View style={styles.metaRow}>
+                      <Text style={styles.category}>
+                        {material.category.toUpperCase()}
+                      </Text>
+
+                      <Text style={styles.lab}>
+                        {laboratory?.department ||
+                          laboratory?.name ||
+                          `LAB ${material.laboratory_id}`}
+                      </Text>
+                    </View>
+
+                    <View style={styles.cardFooter}>
+                      <View>
+                        <Text style={styles.stockLabel}>
+                          CURRENT STOCK
+                        </Text>
+
+                        <Text style={styles.stock}>
+                          {formatQuantity(material.quantity)}{' '}
+                          {material.unit}
+                        </Text>
+
+                        <Text style={styles.minimumStock}>
+                          Minimum: {formatQuantity(material.minimum_quantity)}{' '}
+                          {material.unit}
+                        </Text>
+                      </View>
+
+                      <View
+                        style={[
+                          styles.status,
+                          isLowStock
+                            ? styles.lowStatus
+                            : styles.stockStatus,
+                        ]}
+                      >
+                        {isLowStock && (
+                          <AlertTriangle
+                            size={11}
+                            color={COLORS.brick}
+                            strokeWidth={2}
+                          />
+                        )}
+
+                        <Text
+                          style={[
+                            styles.statusText,
+                            isLowStock
+                              ? styles.lowText
+                              : styles.stockText,
+                          ]}
+                        >
+                          {status}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                )
+              })
+            )}
+          </View>
+        )}
+
+        {/* INVENTORY ATTENTION */}
+
+        {!loading && !error && lowStockCount > 0 && (
+          <View style={styles.note}>
+            <View style={styles.noteIcon}>
+              <AlertTriangle
+                size={17}
+                color={COLORS.ochre}
+                strokeWidth={1.7}
+              />
+            </View>
+
+            <View style={styles.noteContent}>
+              <Text style={styles.noteTitle}>
+                INVENTORY ATTENTION
               </Text>
 
-              <View style={styles.metaRow}>
-                <Text style={styles.category}>
-                  {material.category}
-                </Text>
-
-                <Text style={styles.lab}>
-                  {material.lab}
-                </Text>
-              </View>
-
-              <View style={styles.cardFooter}>
-                <View>
-                  <Text style={styles.stockLabel}>CURRENT STOCK</Text>
-
-                  <Text style={styles.stock}>
-                    {material.stock}
-                  </Text>
-                </View>
-
-                <View
-                  style={[
-                    styles.status,
-                    material.status === 'LOW STOCK'
-                      ? styles.lowStatus
-                      : styles.stockStatus,
-                  ]}
-                >
-                  {material.status === 'LOW STOCK' && (
-                    <AlertTriangle
-                      size={11}
-                      color={COLORS.brick}
-                      strokeWidth={2}
-                    />
-                  )}
-
-                  <Text
-                    style={[
-                      styles.statusText,
-                      material.status === 'LOW STOCK'
-                        ? styles.lowText
-                        : styles.stockText,
-                    ]}
-                  >
-                    {material.status}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* PROCUREMENT NOTE */}
-
-        <View style={styles.note}>
-          <View style={styles.noteIcon}>
-            <AlertTriangle
-              size={17}
-              color={COLORS.ochre}
-              strokeWidth={1.7}
-            />
+              <Text style={styles.noteText}>
+                {lowStockCount} material
+                {lowStockCount === 1 ? ' is' : 's are'} below
+                or at the configured minimum stock level.
+              </Text>
+            </View>
           </View>
-
-          <View style={styles.noteContent}>
-            <Text style={styles.noteTitle}>
-              INVENTORY ATTENTION
-            </Text>
-
-            <Text style={styles.noteText}>
-              5 materials are below their configured reorder
-              threshold.
-            </Text>
-          </View>
-        </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   )
@@ -376,6 +574,17 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  filterButtonActive: {
+    backgroundColor: COLORS.green,
+    borderColor: COLORS.green,
+  },
+
+  filterHint: {
+    color: COLORS.green,
+    fontSize: 10,
+    marginTop: 7,
   },
 
   summary: {
@@ -511,6 +720,12 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 
+  minimumStock: {
+    color: COLORS.muted,
+    fontSize: 9,
+    marginTop: 4,
+  },
+
   status: {
     paddingHorizontal: 8,
     paddingVertical: 5,
@@ -540,6 +755,62 @@ const styles = StyleSheet.create({
 
   lowText: {
     color: COLORS.brick,
+  },
+
+  stateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 35,
+    gap: 12,
+  },
+
+  stateText: {
+    color: COLORS.muted,
+    fontSize: 12,
+  },
+
+  errorText: {
+    color: COLORS.brick,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+
+  retryButton: {
+    backgroundColor: COLORS.softGreen,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 5,
+  },
+
+  retryText: {
+    color: COLORS.green,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 35,
+    paddingHorizontal: 20,
+    backgroundColor: COLORS.paper,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 4,
+  },
+
+  emptyTitle: {
+    color: COLORS.ink,
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 12,
+  },
+
+  emptyText: {
+    color: COLORS.muted,
+    fontSize: 11,
+    textAlign: 'center',
+    lineHeight: 17,
+    marginTop: 6,
   },
 
   note: {

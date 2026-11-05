@@ -1,23 +1,47 @@
+
+import {
+  createExperimentRecord,
+  getExperiment,
+  getExperimentRecords,
+  getLaboratories,
+} from '@/services/api'
 import { router, useLocalSearchParams } from 'expo-router'
 import {
-    ArrowLeft,
-    Beaker,
-    CalendarDays,
-    CheckCircle2,
-    Clock3,
-    FileText,
-    FlaskConical,
-    User,
-    Wrench,
+  ArrowLeft,
+  Beaker,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  FileText,
+  FlaskConical,
+  Plus,
+  RefreshCw,
+  User,
+  Wrench,
 } from 'lucide-react-native'
 import {
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  useCallback,
+  useEffect,
+  useState,
+} from 'react'
+import {
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native'
+
+import type {
+  Experiment,
+  ExperimentRecord,
+  Laboratory,
+} from '@/services/types'
 
 const COLORS = {
   background: '#F5F3EC',
@@ -33,100 +57,195 @@ const COLORS = {
   white: '#FFFFFF',
 }
 
-const experimentData: Record<
-  string,
-  {
-    title: string
-    lab: string
-    researcher: string
-    date: string
-    time: string
-    status: string
-    objective: string
-    sample: string
-    equipment: string
+function formatDate(value: string | null): string {
+  if (!value) return 'NOT SET'
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) return 'NOT SET'
+
+  return date.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).toUpperCase()
+}
+
+function formatTime(value: string | null): string {
+  if (!value) return 'NOT SET'
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) return 'NOT SET'
+
+  return date.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function displayStatus(status: Experiment['status']): string {
+  switch (status) {
+    case 'IN_PROGRESS':
+      return 'IN PROGRESS'
+    case 'PLANNED':
+      return 'SCHEDULED'
+    case 'COMPLETED':
+      return 'COMPLETED'
+    case 'CANCELLED':
+      return 'CANCELLED'
+    default:
+      return status
   }
-> = {
-  'EXP-027': {
-    title: 'PCR Amplification',
-    lab: 'BIOTECHNOLOGY',
-    researcher: 'K. Singh',
-    date: '02 OCT 2026',
-    time: '14:00',
-    status: 'SCHEDULED',
-    objective:
-      'Amplification of the selected DNA target using polymerase chain reaction.',
-    sample: 'SMP-118 — Genomic DNA',
-    equipment: 'Thermal Cycler — EQ-014',
-  },
-
-  'EXP-024': {
-    title: 'Protein Purification',
-    lab: 'BIOCHEMISTRY',
-    researcher: 'A. Sharma',
-    date: '02 OCT 2026',
-    time: '09:00',
-    status: 'IN PROGRESS',
-    objective:
-      'Purification and preparation of the target protein fraction for downstream analysis.',
-    sample: 'SMP-114 — Protein Extract',
-    equipment: 'Centrifuge — EQ-006',
-  },
-
-  'EXP-021': {
-    title: 'Protein Assay',
-    lab: 'BIOCHEMISTRY',
-    researcher: 'N. Verma',
-    date: '01 OCT 2026',
-    time: '15:30',
-    status: 'COMPLETED',
-    objective:
-      'Quantification of protein concentration using the selected assay protocol.',
-    sample: 'SMP-109 — Protein Fraction',
-    equipment: 'Spectrophotometer — EQ-018',
-  },
-
-  'EXP-018': {
-    title: 'Spectrometer Calibration',
-    lab: 'PHYSICS',
-    researcher: 'R. Mehta',
-    date: '30 SEP 2026',
-    time: '11:30',
-    status: 'COMPLETED',
-    objective:
-      'Calibration of the spectrometer against the laboratory reference standard.',
-    sample: 'REF-042 — Calibration Standard',
-    equipment: 'Spectrometer — EQ-018',
-  },
-
-  'EXP-014': {
-    title: 'Polymer Characterisation',
-    lab: 'MATERIALS',
-    researcher: 'S. Rao',
-    date: '29 SEP 2026',
-    time: '10:00',
-    status: 'COMPLETED',
-    objective:
-      'Characterisation of the prepared polymer sample using laboratory instrumentation.',
-    sample: 'SMP-097 — Polymer Batch',
-    equipment: 'Materials Analyser — EQ-011',
-  },
 }
 
 export default function ExperimentDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
 
-  const experiment = experimentData[id ?? 'EXP-027'] ?? {
-    title: 'Experiment Record',
-    lab: 'LABORATORY',
-    researcher: 'Unknown',
-    date: '--',
-    time: '--',
-    status: 'RECORD',
-    objective: 'No experiment information has been entered yet.',
-    sample: 'Not assigned',
-    equipment: 'Not assigned',
+  const experimentId = Number(id)
+
+  const [experiment, setExperiment] = useState<Experiment | null>(null)
+  const [laboratories, setLaboratories] = useState<Laboratory[]>([])
+  const [records, setRecords] = useState<ExperimentRecord[]>([])
+
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState('')
+
+  const [recordType, setRecordType] = useState('OBSERVATION')
+  const [recordNotes, setRecordNotes] = useState('')
+  const [recordedBy, setRecordedBy] = useState('')
+  const [savingRecord, setSavingRecord] = useState(false)
+
+  const loadData = useCallback(async () => {
+    if (!Number.isInteger(experimentId) || experimentId <= 0) {
+      setError('Invalid experiment ID.')
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
+
+    try {
+      setError('')
+
+      const [
+        experimentData,
+        laboratoryData,
+        recordData,
+      ] = await Promise.all([
+        getExperiment(experimentId),
+        getLaboratories(),
+        getExperimentRecords(experimentId),
+      ])
+
+      setExperiment(experimentData)
+      setLaboratories(laboratoryData)
+      setRecords(recordData)
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to load experiment details.'
+      )
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [experimentId])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  const laboratory = laboratories.find(
+    (lab) => lab.id === experiment?.laboratory_id
+  )
+
+  const onRefresh = () => {
+    setRefreshing(true)
+    loadData()
   }
+
+  const handleAddRecord = async () => {
+    if (!recordType.trim() || !recordNotes.trim() || !recordedBy.trim()) {
+      Alert.alert(
+        'Missing information',
+        'Please enter the record type, your name and observation notes.'
+      )
+      return
+    }
+
+    if (!experiment) return
+
+    try {
+      setSavingRecord(true)
+
+      await createExperimentRecord(experiment.id, {
+        recorded_by: recordedBy.trim(),
+        record_type: recordType.trim().toUpperCase(),
+        notes: recordNotes.trim(),
+      })
+
+      setRecordNotes('')
+      setRecordType('OBSERVATION')
+
+      const updatedRecords = await getExperimentRecords(experiment.id)
+      setRecords(updatedRecords)
+
+      Alert.alert('Success', 'Observation saved successfully.')
+    } catch (err) {
+      Alert.alert(
+        'Unable to save',
+        err instanceof Error
+          ? err.message
+          : 'Something went wrong while saving the observation.'
+      )
+    } finally {
+      setSavingRecord(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.messageContainer}>
+          <ActivityIndicator size="large" color={COLORS.green} />
+          <Text style={styles.messageText}>
+            Loading experiment details...
+          </Text>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  if (error || !experiment) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.messageContainer}>
+          <Text style={styles.errorText}>
+            {error || 'Experiment not found.'}
+          </Text>
+
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              setLoading(true)
+              loadData()
+            }}
+          >
+            <RefreshCw size={15} color={COLORS.white} />
+            <Text style={styles.retryText}>TRY AGAIN</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={styles.backText}>GO BACK</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  const status = displayStatus(experiment.status)
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -134,6 +253,14 @@ export default function ExperimentDetailsScreen() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={COLORS.green}
+              colors={[COLORS.green]}
+            />
+          }
         >
           {/* HEADER */}
 
@@ -151,8 +278,7 @@ export default function ExperimentDetailsScreen() {
 
             <View style={styles.headerText}>
               <Text style={styles.eyebrow}>EXPERIMENT RECORD</Text>
-
-              <Text style={styles.recordId}>{id}</Text>
+              <Text style={styles.recordId}>DB ID {experiment.id}</Text>
             </View>
 
             <View style={styles.beakerIcon}>
@@ -169,16 +295,18 @@ export default function ExperimentDetailsScreen() {
           {/* TITLE */}
 
           <View style={styles.titleBlock}>
-            <Text style={styles.lab}>{experiment.lab}</Text>
+            <Text style={styles.lab}>
+              {laboratory?.department || `LAB ${experiment.laboratory_id}`}
+            </Text>
 
-            <Text style={styles.title}>{experiment.title}</Text>
+            <Text style={styles.title}>{experiment.name}</Text>
 
             <View
               style={[
                 styles.status,
-                experiment.status === 'IN PROGRESS'
+                status === 'IN PROGRESS'
                   ? styles.statusProgress
-                  : experiment.status === 'COMPLETED'
+                  : status === 'COMPLETED'
                     ? styles.statusCompleted
                     : styles.statusScheduled,
               ]}
@@ -186,14 +314,14 @@ export default function ExperimentDetailsScreen() {
               <Text
                 style={[
                   styles.statusText,
-                  experiment.status === 'IN PROGRESS'
+                  status === 'IN PROGRESS'
                     ? styles.progressText
-                    : experiment.status === 'COMPLETED'
+                    : status === 'COMPLETED'
                       ? styles.completedText
                       : styles.scheduledText,
                 ]}
               >
-                {experiment.status}
+                {status}
               </Text>
             </View>
           </View>
@@ -202,7 +330,6 @@ export default function ExperimentDetailsScreen() {
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionNumber}>01</Text>
-
             <Text style={styles.sectionTitle}>
               RECORD INFORMATION
             </Text>
@@ -217,9 +344,9 @@ export default function ExperimentDetailsScreen() {
               />
 
               <View style={styles.metaText}>
-                <Text style={styles.metaLabel}>DATE</Text>
+                <Text style={styles.metaLabel}>START DATE</Text>
                 <Text style={styles.metaValue}>
-                  {experiment.date}
+                  {formatDate(experiment.start_time)}
                 </Text>
               </View>
             </View>
@@ -232,9 +359,9 @@ export default function ExperimentDetailsScreen() {
               />
 
               <View style={styles.metaText}>
-                <Text style={styles.metaLabel}>SCHEDULED TIME</Text>
+                <Text style={styles.metaLabel}>START TIME</Text>
                 <Text style={styles.metaValue}>
-                  {experiment.time}
+                  {formatTime(experiment.start_time)}
                 </Text>
               </View>
             </View>
@@ -249,7 +376,22 @@ export default function ExperimentDetailsScreen() {
               <View style={styles.metaText}>
                 <Text style={styles.metaLabel}>RESEARCHER</Text>
                 <Text style={styles.metaValue}>
-                  {experiment.researcher}
+                  {experiment.started_by || 'Not specified'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.metaItem}>
+              <Beaker
+                size={17}
+                color={COLORS.green}
+                strokeWidth={1.7}
+              />
+
+              <View style={styles.metaText}>
+                <Text style={styles.metaLabel}>LABORATORY</Text>
+                <Text style={styles.metaValue}>
+                  {laboratory?.name || `Laboratory ${experiment.laboratory_id}`}
                 </Text>
               </View>
             </View>
@@ -259,24 +401,20 @@ export default function ExperimentDetailsScreen() {
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionNumber}>02</Text>
-
             <Text style={styles.sectionTitle}>OBJECTIVE</Text>
           </View>
 
           <View style={styles.objectiveCard}>
             <Text style={styles.objectiveText}>
-              {experiment.objective}
+              {experiment.description || 'No experiment description has been added.'}
             </Text>
           </View>
 
-          {/* SAMPLE + EQUIPMENT */}
+          {/* LINKED RECORDS */}
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionNumber}>03</Text>
-
-            <Text style={styles.sectionTitle}>
-              LINKED RECORDS
-            </Text>
+            <Text style={styles.sectionTitle}>LINKED RECORDS</Text>
           </View>
 
           <View style={styles.linkedCard}>
@@ -291,9 +429,8 @@ export default function ExperimentDetailsScreen() {
 
               <View style={styles.linkedInfo}>
                 <Text style={styles.linkedLabel}>SAMPLE</Text>
-
                 <Text style={styles.linkedValue}>
-                  {experiment.sample}
+                  Not linked yet
                 </Text>
               </View>
             </View>
@@ -311,9 +448,8 @@ export default function ExperimentDetailsScreen() {
 
               <View style={styles.linkedInfo}>
                 <Text style={styles.linkedLabel}>EQUIPMENT</Text>
-
                 <Text style={styles.linkedValue}>
-                  {experiment.equipment}
+                  Not linked yet
                 </Text>
               </View>
             </View>
@@ -323,27 +459,114 @@ export default function ExperimentDetailsScreen() {
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionNumber}>04</Text>
-
             <Text style={styles.sectionTitle}>OBSERVATIONS</Text>
           </View>
 
-          <View style={styles.emptyCard}>
-            <View style={styles.emptyIcon}>
-              <FileText
-                size={20}
-                color={COLORS.muted}
-                strokeWidth={1.5}
-              />
+          {records.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIcon}>
+                <FileText
+                  size={20}
+                  color={COLORS.muted}
+                  strokeWidth={1.5}
+                />
+              </View>
+
+              <Text style={styles.emptyTitle}>
+                No observations recorded
+              </Text>
+
+              <Text style={styles.emptyText}>
+                Experimental notes and observations will appear here
+                once entered.
+              </Text>
             </View>
+          ) : (
+            <View style={styles.recordsList}>
+              {records.map((record) => (
+                <View key={record.id} style={styles.recordCard}>
+                  <View style={styles.recordHeader}>
+                    <Text style={styles.recordType}>
+                      {record.record_type}
+                    </Text>
 
-            <Text style={styles.emptyTitle}>
-              No observations recorded
-            </Text>
+                    <Text style={styles.recordDate}>
+                      {formatDate(record.created_at)}
+                    </Text>
+                  </View>
 
-            <Text style={styles.emptyText}>
-              Experimental notes and observations will appear here
-              once entered.
-            </Text>
+                  <Text style={styles.recordNotes}>
+                    {record.notes}
+                  </Text>
+
+                  <Text style={styles.recordAuthor}>
+                    Recorded by {record.recorded_by}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* ADD OBSERVATION */}
+
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionNumber}>05</Text>
+            <Text style={styles.sectionTitle}>ADD OBSERVATION</Text>
+          </View>
+
+          <View style={styles.addRecordCard}>
+            <Text style={styles.inputLabel}>RECORD TYPE</Text>
+
+            <TextInput
+              style={styles.recordInput}
+              value={recordType}
+              onChangeText={setRecordType}
+              placeholder="e.g. OBSERVATION"
+              placeholderTextColor={COLORS.muted}
+              autoCapitalize="characters"
+            />
+
+            <Text style={styles.inputLabel}>RECORDED BY</Text>
+
+            <TextInput
+              style={styles.recordInput}
+              value={recordedBy}
+              onChangeText={setRecordedBy}
+              placeholder="Enter your name"
+              placeholderTextColor={COLORS.muted}
+            />
+
+            <Text style={styles.inputLabel}>NOTES</Text>
+
+            <TextInput
+              style={[styles.recordInput, styles.notesInput]}
+              value={recordNotes}
+              onChangeText={setRecordNotes}
+              placeholder="Enter experiment observations..."
+              placeholderTextColor={COLORS.muted}
+              multiline
+              textAlignVertical="top"
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.saveButton,
+                savingRecord && styles.saveButtonDisabled,
+              ]}
+              onPress={handleAddRecord}
+              disabled={savingRecord}
+            >
+              {savingRecord ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <>
+                  <Plus size={16} color={COLORS.white} />
+                  <Text style={styles.saveButtonText}>
+                    SAVE OBSERVATION
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
 
           {/* ARCHIVAL STATUS */}
@@ -361,8 +584,7 @@ export default function ExperimentDetailsScreen() {
               </Text>
 
               <Text style={styles.archiveText}>
-                This experiment is linked to its sample,
-                equipment and laboratory.
+                This experiment is stored in the laboratory database.
               </Text>
             </View>
           </View>
@@ -651,6 +873,104 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
 
+  recordsList: {
+    gap: 9,
+  },
+
+  recordCard: {
+    backgroundColor: COLORS.paper,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 4,
+    padding: 14,
+  },
+
+  recordHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  recordType: {
+    color: COLORS.green,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+
+  recordDate: {
+    color: COLORS.muted,
+    fontSize: 8,
+    fontWeight: '700',
+  },
+
+  recordNotes: {
+    color: COLORS.ink,
+    fontSize: 12,
+    lineHeight: 19,
+    marginTop: 10,
+  },
+
+  recordAuthor: {
+    color: COLORS.muted,
+    fontSize: 9,
+    marginTop: 10,
+  },
+
+  addRecordCard: {
+    backgroundColor: COLORS.paper,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 4,
+    padding: 14,
+    gap: 9,
+  },
+
+  inputLabel: {
+    color: COLORS.muted,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginTop: 5,
+  },
+
+  recordInput: {
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    color: COLORS.ink,
+    fontSize: 12,
+  },
+
+  notesInput: {
+    minHeight: 100,
+  },
+
+  saveButton: {
+    backgroundColor: COLORS.green,
+    borderRadius: 4,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  saveButtonText: {
+    color: COLORS.white,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+
   archiveCard: {
     marginTop: 24,
     padding: 14,
@@ -677,5 +997,51 @@ const styles = StyleSheet.create({
     fontSize: 9,
     lineHeight: 14,
     marginTop: 3,
+  },
+
+  messageContainer: {
+    flex: 1,
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    backgroundColor: COLORS.background,
+  },
+
+  messageText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  errorText: {
+    color: COLORS.brick,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  retryButton: {
+    backgroundColor: COLORS.green,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  retryText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+
+  backText: {
+    color: COLORS.green,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginTop: 5,
   },
 })

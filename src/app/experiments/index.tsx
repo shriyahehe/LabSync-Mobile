@@ -1,22 +1,35 @@
-﻿import { router } from 'expo-router'
+﻿
+import { router, useFocusEffect } from 'expo-router'
 import {
-    ArrowLeft,
-    Beaker,
-    ChevronRight,
-    Filter,
-    Plus,
-    Search,
+  ArrowLeft,
+  Beaker,
+  ChevronRight,
+  Filter,
+  Plus,
+  Search,
 } from 'lucide-react-native'
+import { useCallback, useMemo, useState } from 'react'
 import {
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native'
 
+import {
+  getExperiments,
+  getLaboratories,
+} from '@/services/api'
+
+import type {
+  Experiment,
+  Laboratory,
+} from '@/services/types'
 
 const COLORS = {
   background: '#F5F3EC',
@@ -30,56 +43,155 @@ const COLORS = {
   border: '#D8DDD8',
 }
 
-const experiments = [
-  {
-    id: 'EXP-027',
-    title: 'PCR Amplification',
-    lab: 'BIOTECHNOLOGY',
-    researcher: 'K. Singh',
-    date: '02 OCT',
-    status: 'SCHEDULED',
-  },
-  {
-    id: 'EXP-024',
-    title: 'Protein Purification',
-    lab: 'BIOCHEMISTRY',
-    researcher: 'A. Sharma',
-    date: '02 OCT',
-    status: 'IN PROGRESS',
-  },
-  {
-    id: 'EXP-021',
-    title: 'Protein Assay',
-    lab: 'BIOCHEMISTRY',
-    researcher: 'N. Verma',
-    date: '01 OCT',
-    status: 'COMPLETED',
-  },
-  {
-    id: 'EXP-018',
-    title: 'Spectrometer Calibration',
-    lab: 'PHYSICS',
-    researcher: 'R. Mehta',
-    date: '30 SEP',
-    status: 'COMPLETED',
-  },
-  {
-    id: 'EXP-014',
-    title: 'Polymer Characterisation',
-    lab: 'MATERIALS',
-    researcher: 'S. Rao',
-    date: '29 SEP',
-    status: 'COMPLETED',
-  },
-]
+type ExperimentCardData = {
+  id: number
+  displayId: string
+  title: string
+  lab: string
+  researcher: string
+  date: string
+  status: 'IN PROGRESS' | 'SCHEDULED' | 'COMPLETED' | 'CANCELLED'
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return 'DATE NOT SET'
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) return 'DATE NOT SET'
+
+  return date
+    .toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+    })
+    .toUpperCase()
+}
+
+function mapStatus(
+  status: Experiment['status']
+): ExperimentCardData['status'] {
+  switch (status) {
+    case 'IN_PROGRESS':
+      return 'IN PROGRESS'
+
+    case 'PLANNED':
+      return 'SCHEDULED'
+
+    case 'COMPLETED':
+      return 'COMPLETED'
+
+    case 'CANCELLED':
+      return 'CANCELLED'
+
+    default:
+      return 'CANCELLED'
+  }
+}
 
 export default function ExperimentsScreen() {
+  const [experiments, setExperiments] = useState<Experiment[]>([])
+  const [laboratories, setLaboratories] = useState<Laboratory[]>([])
+  const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState('')
+
+  const loadData = useCallback(async () => {
+    try {
+      setError('')
+
+      const [experimentData, laboratoryData] = await Promise.all([
+        getExperiments(),
+        getLaboratories(),
+      ])
+
+      setExperiments(experimentData)
+      setLaboratories(laboratoryData)
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to load experiments.'
+      )
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
+
+  useFocusEffect(
+  useCallback(() => {
+    loadData()
+  }, [loadData])
+)
+
+  const laboratoryMap = useMemo(
+    () => new Map(laboratories.map((lab) => [lab.id, lab])),
+    [laboratories]
+  )
+
+  const experimentCards: ExperimentCardData[] = useMemo(
+    () =>
+      experiments.map((experiment) => {
+        const laboratory = laboratoryMap.get(experiment.laboratory_id)
+
+        return {
+          id: experiment.id,
+          displayId: `DB ID ${experiment.id}`,
+          title: experiment.name,
+          lab: laboratory?.department || `LAB ${experiment.laboratory_id}`,
+          researcher: experiment.started_by || 'Not specified',
+          date: formatDate(experiment.start_time),
+          status: mapStatus(experiment.status),
+        }
+      }),
+    [experiments, laboratoryMap]
+  )
+
+  const filteredExperiments = useMemo(() => {
+    const query = search.trim().toLowerCase()
+
+    if (!query) return experimentCards
+
+    return experimentCards.filter((experiment) =>
+      [
+        experiment.title,
+        experiment.displayId,
+        experiment.lab,
+        experiment.researcher,
+        experiment.status,
+      ].some((value) => value.toLowerCase().includes(query))
+    )
+  }, [experimentCards, search])
+
+  const activeCount = experiments.filter(
+    (experiment) => experiment.status === 'IN_PROGRESS'
+  ).length
+
+  const plannedCount = experiments.filter(
+    (experiment) => experiment.status === 'PLANNED'
+  ).length
+
+  const onRefresh = () => {
+    setRefreshing(true)
+    loadData()
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={COLORS.green}
+              colors={[COLORS.green]}
+            />
+          }
         >
           <View style={styles.header}>
             <TouchableOpacity
@@ -98,13 +210,16 @@ export default function ExperimentsScreen() {
               <Text style={styles.title}>Experiments</Text>
             </View>
 
-            <TouchableOpacity style={styles.addButton}>
-              <Plus
-                size={20}
-                color="#FFFFFF"
-                strokeWidth={2}
-              />
-            </TouchableOpacity>
+            <TouchableOpacity
+  style={styles.addButton}
+  onPress={() => router.push('/experiments/create')}
+>
+  <Plus
+    size={20}
+    color="#FFFFFF"
+    strokeWidth={2}
+  />
+</TouchableOpacity>
           </View>
 
           <View style={styles.rule} />
@@ -121,6 +236,8 @@ export default function ExperimentsScreen() {
                 placeholder="Search experiments..."
                 placeholderTextColor={COLORS.muted}
                 style={styles.searchInput}
+                value={search}
+                onChangeText={setSearch}
               />
             </View>
 
@@ -135,22 +252,22 @@ export default function ExperimentsScreen() {
 
           <View style={styles.summary}>
             <View>
-              <Text style={styles.summaryNumber}>12</Text>
+              <Text style={styles.summaryNumber}>{activeCount}</Text>
               <Text style={styles.summaryLabel}>ACTIVE RECORDS</Text>
             </View>
 
             <View style={styles.summaryDivider} />
 
             <View>
-              <Text style={styles.summaryNumber}>03</Text>
-              <Text style={styles.summaryLabel}>DUE TODAY</Text>
+              <Text style={styles.summaryNumber}>{plannedCount}</Text>
+              <Text style={styles.summaryLabel}>PLANNED</Text>
             </View>
 
             <View style={styles.summaryDivider} />
 
             <View>
-              <Text style={styles.summaryNumber}>47</Text>
-              <Text style={styles.summaryLabel}>TOTAL THIS MONTH</Text>
+              <Text style={styles.summaryNumber}>{experiments.length}</Text>
+              <Text style={styles.summaryLabel}>TOTAL RECORDS</Text>
             </View>
           </View>
 
@@ -159,85 +276,118 @@ export default function ExperimentsScreen() {
             <Text style={styles.sectionTitle}>EXPERIMENT REGISTER</Text>
           </View>
 
-          <View style={styles.list}>
-            {experiments.map((experiment) => (
-              <TouchableOpacity
-                key={experiment.id}
-                style={styles.card}
-                onPress={() =>
-                  router.push(
-                    `/experiments/${experiment.id}` as any
-                  )
-                }
-              >
-                <View style={styles.cardHeader}>
-                  <View style={styles.idRow}>
-                    <Beaker
-                      size={15}
-                      color={COLORS.green}
-                      strokeWidth={1.7}
-                    />
+          {loading ? (
+            <View style={styles.messageContainer}>
+              <ActivityIndicator size="large" color={COLORS.green} />
+              <Text style={styles.messageText}>
+                Loading experiments...
+              </Text>
+            </View>
+          ) : error ? (
+            <View style={styles.messageContainer}>
+              <Text style={styles.errorText}>{error}</Text>
 
-                    <Text style={styles.experimentId}>
-                      {experiment.id}
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={() => {
+                  setLoading(true)
+                  loadData()
+                }}
+              >
+                <Text style={styles.retryText}>TRY AGAIN</Text>
+              </TouchableOpacity>
+            </View>
+          ) : filteredExperiments.length === 0 ? (
+            <View style={styles.messageContainer}>
+              <Text style={styles.messageText}>
+                {search
+                  ? 'No matching experiments found.'
+                  : 'No experiments have been recorded yet.'}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.list}>
+              {filteredExperiments.map((experiment) => (
+                <TouchableOpacity
+                  key={experiment.id}
+                  style={styles.card}
+                  onPress={() =>
+                    router.push(`/experiments/${experiment.id}` as any)
+                  }
+                >
+                  <View style={styles.cardHeader}>
+                    <View style={styles.idRow}>
+                      <Beaker
+                        size={15}
+                        color={COLORS.green}
+                        strokeWidth={1.7}
+                      />
+
+                      <Text style={styles.experimentId}>
+                        {experiment.displayId}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.date}>
+                      {experiment.date}
                     </Text>
                   </View>
 
-                  <Text style={styles.date}>
-                    {experiment.date}
-                  </Text>
-                </View>
-
-                <Text style={styles.experimentTitle}>
-                  {experiment.title}
-                </Text>
-
-                <View style={styles.metaRow}>
-                  <Text style={styles.lab}>
-                    {experiment.lab}
+                  <Text style={styles.experimentTitle}>
+                    {experiment.title}
                   </Text>
 
-                  <Text style={styles.researcher}>
-                    {experiment.researcher}
-                  </Text>
-                </View>
+                  <View style={styles.metaRow}>
+                    <Text style={styles.lab}>
+                      {experiment.lab}
+                    </Text>
 
-                <View style={styles.cardFooter}>
-                  <View
-                    style={[
-                      styles.status,
-                      experiment.status === 'IN PROGRESS' &&
-                        styles.statusProgress,
-                      experiment.status === 'SCHEDULED' &&
-                        styles.statusScheduled,
-                      experiment.status === 'COMPLETED' &&
-                        styles.statusCompleted,
-                    ]}
-                  >
-                    <Text
+                    <Text style={styles.researcher}>
+                      {experiment.researcher}
+                    </Text>
+                  </View>
+
+                  <View style={styles.cardFooter}>
+                    <View
                       style={[
-                        styles.statusText,
+                        styles.status,
                         experiment.status === 'IN PROGRESS' &&
-                          styles.progressText,
+                          styles.statusProgress,
                         experiment.status === 'SCHEDULED' &&
-                          styles.scheduledText,
+                          styles.statusScheduled,
                         experiment.status === 'COMPLETED' &&
-                          styles.completedText,
+                          styles.statusCompleted,
+                        experiment.status === 'CANCELLED' &&
+                          styles.statusCancelled,
                       ]}
                     >
-                      {experiment.status}
-                    </Text>
-                  </View>
+                      <Text
+                        style={[
+                          styles.statusText,
+                          experiment.status === 'IN PROGRESS' &&
+                            styles.progressText,
+                          experiment.status === 'SCHEDULED' &&
+                            styles.scheduledText,
+                          experiment.status === 'COMPLETED' &&
+                            styles.completedText,
+                          experiment.status === 'CANCELLED' &&
+                            styles.cancelledText,
+                        ]}
+                      >
+                        {experiment.status}
+                      </Text>
+                    </View>
 
-                  <ChevronRight
-                    size={17}
-                    color={COLORS.muted}
-                    strokeWidth={1.6}
-                  />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
+                    <ChevronRight
+                      size={17}
+                      color={COLORS.muted}
+                      strokeWidth={1.6}
+                    />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </ScrollView>
       </View>
     </SafeAreaView>
@@ -487,6 +637,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#E7ECEC',
   },
 
+  statusCancelled: {
+    backgroundColor: '#F3E2DF',
+  },
+
   statusText: {
     fontSize: 7,
     fontWeight: '800',
@@ -503,5 +657,42 @@ const styles = StyleSheet.create({
 
   completedText: {
     color: COLORS.blue,
+  },
+
+  cancelledText: {
+    color: '#A4473C',
+  },
+
+  messageContainer: {
+    paddingVertical: 35,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+
+  messageText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  errorText: {
+    color: '#A4473C',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  retryButton: {
+    backgroundColor: COLORS.green,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 4,
+  },
+
+  retryText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
 })
