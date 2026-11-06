@@ -181,3 +181,53 @@ export interface CreateLabEntryInput {
   researcher_name: string;
   notes: string;
 }
+
+export interface Sample {
+  id: number;
+  laboratory_id: number;
+  name: string;
+  sample_type: string;
+  description?: string | null;
+  initial_quantity: number;
+  available_quantity: number;
+  unit: string;
+  storage_location?: string | null;
+  created_at: string;
+}
+
+export interface CreateSampleInput {
+  laboratory_id: number;
+  name: string;
+  sample_type: string;
+  description?: string;
+  initial_quantity: number;
+  unit: string;
+  storage_location?: string;
+}
+
+export type SampleTransactionType = 'USE' | 'RESTOCK';
+
+export interface SampleTransaction {
+  id: number;
+  sample_id: number;
+  researcher_id?: number | null;
+  transaction_type: SampleTransactionType;
+  quantity: number;
+  performed_by: string;
+  notes: string;
+  created_at: string;
+}
+
+export interface CreateSampleTransactionInput {
+  sample_id: number;
+  researcher_id?: number;
+  performed_by?: string;
+  transaction_type: SampleTransactionType;
+  quantity: number;
+  notes?: string;
+}
+
+export interface CreateSampleTransactionResponse {
+  transaction: SampleTransaction;
+  available_quantity: number;
+}

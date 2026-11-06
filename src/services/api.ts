@@ -8,6 +8,9 @@ import type {
   CreateLabEntryInput,
   CreateLaboratoryInput,
   CreateMaterialInput,
+  CreateSampleInput,
+  CreateSampleTransactionInput,
+  CreateSampleTransactionResponse,
   Equipment,
   EquipmentTransaction,
   Experiment,
@@ -16,6 +19,8 @@ import type {
   LabEntry,
   Laboratory,
   Material,
+  Sample,
+  SampleTransaction,
   UpdateExperimentInput,
 } from './types';
 
@@ -298,3 +303,23 @@ export const checkOutResearcher = (
     `/api/lab-entries/${encodeURIComponent(String(entryId))}/check-out`,
     {}
   );
+export const getSamples = (): Promise<Sample[]> =>
+  getList<Sample>('/api/samples');
+
+export const getSample = (id: number): Promise<Sample> =>
+  request<Sample>(`/api/samples/${encodeURIComponent(String(id))}`, {
+    method: 'GET',
+  });
+
+export const createSample = (
+  input: CreateSampleInput
+): Promise<Sample> =>
+  post<Sample>('/api/samples', input);
+
+export const getSampleTransactions = (): Promise<SampleTransaction[]> =>
+  getList<SampleTransaction>('/api/sample-transactions');
+
+export const createSampleTransaction = (
+  input: CreateSampleTransactionInput
+): Promise<CreateSampleTransactionResponse> =>
+  post<CreateSampleTransactionResponse>('/api/sample-transactions', input);
