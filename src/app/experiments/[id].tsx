@@ -7,17 +7,19 @@ import {
 } from '@/services/api'
 import { router, useLocalSearchParams } from 'expo-router'
 import {
+  AlertCircle,
   ArrowLeft,
   Beaker,
   CalendarDays,
   CheckCircle2,
+  ChevronRight,
   Clock3,
   FileText,
   FlaskConical,
   Plus,
   RefreshCw,
   User,
-  Wrench,
+  Wrench
 } from 'lucide-react-native'
 import {
   useCallback,
@@ -37,25 +39,17 @@ import {
   View,
 } from 'react-native'
 
+import {
+  LabSyncColors as C,
+  LabSyncRadius as R,
+  LabSyncShadows as S,
+} from '@/constants/labsync-theme'
+
 import type {
   Experiment,
   ExperimentRecord,
   Laboratory,
 } from '@/services/types'
-
-const COLORS = {
-  background: '#F5F3EC',
-  paper: '#FCFBF7',
-  ink: '#172A36',
-  muted: '#65747C',
-  green: '#176B63',
-  softGreen: '#DCE9E3',
-  blue: '#527A8A',
-  ochre: '#B77932',
-  brick: '#B84A42',
-  border: '#D8DDD8',
-  white: '#FFFFFF',
-}
 
 function formatDate(value: string | null): string {
   if (!value) return 'NOT SET'
@@ -97,6 +91,70 @@ function displayStatus(status: Experiment['status']): string {
     default:
       return status
   }
+}
+
+function getStatusColors(status: string) {
+  switch (status) {
+    case 'IN PROGRESS':
+      return {
+        background: C.primaryLight,
+        foreground: C.primary,
+        dot: C.success,
+      }
+    case 'COMPLETED':
+      return {
+        background: C.successLight,
+        foreground: C.success,
+        dot: C.success,
+      }
+    case 'CANCELLED':
+      return {
+        background: C.dangerLight,
+        foreground: C.danger,
+        dot: C.danger,
+      }
+    default:
+      return {
+        background: C.warningLight,
+        foreground: C.accent,
+        dot: C.accent,
+      }
+  }
+}
+
+function SectionHeading({
+  number,
+  title,
+}: {
+  number: string
+  title: string
+}) {
+  return (
+    <View style={styles.sectionHeading}>
+      <Text style={styles.sectionNumber}>{number}</Text>
+      <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
+  )
+}
+
+function MetadataItem({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: string
+}) {
+  return (
+    <View style={styles.metadataItem}>
+      <View style={styles.metadataIcon}>{icon}</View>
+      <View style={styles.metadataText}>
+        <Text style={styles.metadataLabel}>{label}</Text>
+        <Text style={styles.metadataValue}>{value}</Text>
+      </View>
+    </View>
+  )
 }
 
 export default function ExperimentDetailsScreen() {
@@ -208,9 +266,9 @@ export default function ExperimentDetailsScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.messageContainer}>
-          <ActivityIndicator size="large" color={COLORS.green} />
-          <Text style={styles.messageText}>
+        <View style={styles.centerState}>
+          <ActivityIndicator size="large" color={C.primary} />
+          <Text style={styles.stateText}>
             Loading experiment details...
           </Text>
         </View>
@@ -221,7 +279,12 @@ export default function ExperimentDetailsScreen() {
   if (error || !experiment) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.messageContainer}>
+        <View style={styles.centerState}>
+          <View style={styles.errorIcon}>
+            <AlertCircle size={25} color={C.danger} />
+          </View>
+
+          <Text style={styles.errorTitle}>Record unavailable</Text>
           <Text style={styles.errorText}>
             {error || 'Experiment not found.'}
           </Text>
@@ -233,7 +296,7 @@ export default function ExperimentDetailsScreen() {
               loadData()
             }}
           >
-            <RefreshCw size={15} color={COLORS.white} />
+            <RefreshCw size={15} color={C.white} />
             <Text style={styles.retryText}>TRY AGAIN</Text>
           </TouchableOpacity>
 
@@ -246,79 +309,64 @@ export default function ExperimentDetailsScreen() {
   }
 
   const status = displayStatus(experiment.status)
+  const statusColors = getStatusColors(status)
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.content}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={COLORS.green}
-              colors={[COLORS.green]}
-            />
-          }
-        >
-          {/* HEADER */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={C.primary}
+            colors={[C.primary]}
+          />
+        }
+      >
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <ArrowLeft size={19} color={C.ink} />
+          </TouchableOpacity>
 
-          <View style={styles.header}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => router.back()}
-            >
-              <ArrowLeft
-                size={19}
-                color={COLORS.ink}
-                strokeWidth={1.8}
-              />
-            </TouchableOpacity>
-
-            <View style={styles.headerText}>
-              <Text style={styles.eyebrow}>EXPERIMENT RECORD</Text>
-              <Text style={styles.recordId}>DB ID {experiment.id}</Text>
-            </View>
-
-            <View style={styles.beakerIcon}>
-              <Beaker
-                size={20}
-                color={COLORS.green}
-                strokeWidth={1.6}
-              />
-            </View>
+          <View style={styles.headerText}>
+            <Text style={styles.eyebrow}>RESEARCH RECORD</Text>
+            <Text style={styles.recordId}>
+              EXPERIMENT #{experiment.id}
+            </Text>
           </View>
 
-          <View style={styles.rule} />
+          <View style={styles.headerIcon}>
+            <Beaker size={20} color={C.primary} />
+          </View>
+        </View>
 
-          {/* TITLE */}
-
-          <View style={styles.titleBlock}>
-            <Text style={styles.lab}>
-              {laboratory?.department || `LAB ${experiment.laboratory_id}`}
-            </Text>
-
-            <Text style={styles.title}>{experiment.name}</Text>
+        <View style={styles.heroCard}>
+          <View style={styles.heroTop}>
+            <View style={styles.heroIcon}>
+              <FlaskConical size={23} color={C.white} />
+            </View>
 
             <View
               style={[
-                styles.status,
-                status === 'IN PROGRESS'
-                  ? styles.statusProgress
-                  : status === 'COMPLETED'
-                    ? styles.statusCompleted
-                    : styles.statusScheduled,
+                styles.statusBadge,
+                { backgroundColor: statusColors.background },
               ]}
             >
+              <View
+                style={[
+                  styles.statusDot,
+                  { backgroundColor: statusColors.dot },
+                ]}
+              />
               <Text
                 style={[
                   styles.statusText,
-                  status === 'IN PROGRESS'
-                    ? styles.progressText
-                    : status === 'COMPLETED'
-                      ? styles.completedText
-                      : styles.scheduledText,
+                  { color: statusColors.foreground },
                 ]}
               >
                 {status}
@@ -326,270 +374,251 @@ export default function ExperimentDetailsScreen() {
             </View>
           </View>
 
-          {/* RECORD METADATA */}
+          <Text style={styles.heroLab}>
+            {laboratory?.department || `LAB ${experiment.laboratory_id}`}
+          </Text>
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionNumber}>01</Text>
-            <Text style={styles.sectionTitle}>
-              RECORD INFORMATION
+          <Text style={styles.heroTitle}>{experiment.name}</Text>
+
+          <View style={styles.heroFooter}>
+            <View style={styles.heroFooterItem}>
+              <CalendarDays size={14} color="#DCE9E3" />
+              <Text style={styles.heroFooterText}>
+                {formatDate(experiment.start_time)}
+              </Text>
+            </View>
+
+            <View style={styles.heroFooterItem}>
+              <Clock3 size={14} color="#DCE9E3" />
+              <Text style={styles.heroFooterText}>
+                {formatTime(experiment.start_time)}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <SectionHeading number="01" title="RECORD INFORMATION" />
+
+        <View style={styles.metadataCard}>
+          <MetadataItem
+            icon={<User size={17} color={C.primary} />}
+            label="RESEARCHER"
+            value={experiment.started_by || 'Not specified'}
+          />
+
+          <View style={styles.metadataDivider} />
+
+          <MetadataItem
+            icon={<Beaker size={17} color={C.secondary} />}
+            label="LABORATORY"
+            value={
+              laboratory?.name || `Laboratory ${experiment.laboratory_id}`
+            }
+          />
+
+          <View style={styles.metadataDivider} />
+
+          <MetadataItem
+            icon={<CalendarDays size={17} color={C.accent} />}
+            label="START DATE"
+            value={formatDate(experiment.start_time)}
+          />
+
+          <View style={styles.metadataDivider} />
+
+          <MetadataItem
+            icon={<Clock3 size={17} color={C.secondary} />}
+            label="START TIME"
+            value={formatTime(experiment.start_time)}
+          />
+        </View>
+
+        <SectionHeading number="02" title="EXPERIMENT OBJECTIVE" />
+
+        <View style={styles.objectiveCard}>
+          <View style={styles.objectiveHeader}>
+            <View style={styles.objectiveIcon}>
+              <FileText size={17} color={C.primary} />
+            </View>
+            <Text style={styles.objectiveLabel}>DESCRIPTION</Text>
+          </View>
+
+          <Text style={styles.objectiveText}>
+            {experiment.description ||
+              'No experiment description has been added.'}
+          </Text>
+        </View>
+
+        <SectionHeading number="03" title="LINKED RECORDS" />
+
+        <View style={styles.linkedCard}>
+          <View style={styles.linkedRow}>
+            <View style={styles.linkedIcon}>
+              <FlaskConical size={18} color={C.primary} />
+            </View>
+
+            <View style={styles.linkedInfo}>
+              <Text style={styles.linkedLabel}>SAMPLE</Text>
+              <Text style={styles.linkedValue}>Not linked yet</Text>
+            </View>
+
+            <ChevronRight size={17} color={C.subtle} />
+          </View>
+
+          <View style={styles.linkedDivider} />
+
+          <View style={styles.linkedRow}>
+            <View style={[styles.linkedIcon, styles.equipmentIcon]}>
+              <Wrench size={18} color={C.accent} />
+            </View>
+
+            <View style={styles.linkedInfo}>
+              <Text style={styles.linkedLabel}>EQUIPMENT</Text>
+              <Text style={styles.linkedValue}>Not linked yet</Text>
+            </View>
+
+            <ChevronRight size={17} color={C.subtle} />
+          </View>
+        </View>
+
+        <View style={styles.observationHeading}>
+          <View>
+            <SectionHeading number="04" title="OBSERVATIONS" />
+            <Text style={styles.observationSubtitle}>
+              Recorded experimental notes
             </Text>
           </View>
 
-          <View style={styles.metadataCard}>
-            <View style={styles.metaItem}>
-              <CalendarDays
-                size={17}
-                color={COLORS.green}
-                strokeWidth={1.7}
-              />
-
-              <View style={styles.metaText}>
-                <Text style={styles.metaLabel}>START DATE</Text>
-                <Text style={styles.metaValue}>
-                  {formatDate(experiment.start_time)}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.metaItem}>
-              <Clock3
-                size={17}
-                color={COLORS.ochre}
-                strokeWidth={1.7}
-              />
-
-              <View style={styles.metaText}>
-                <Text style={styles.metaLabel}>START TIME</Text>
-                <Text style={styles.metaValue}>
-                  {formatTime(experiment.start_time)}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.metaItem}>
-              <User
-                size={17}
-                color={COLORS.blue}
-                strokeWidth={1.7}
-              />
-
-              <View style={styles.metaText}>
-                <Text style={styles.metaLabel}>RESEARCHER</Text>
-                <Text style={styles.metaValue}>
-                  {experiment.started_by || 'Not specified'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.metaItem}>
-              <Beaker
-                size={17}
-                color={COLORS.green}
-                strokeWidth={1.7}
-              />
-
-              <View style={styles.metaText}>
-                <Text style={styles.metaLabel}>LABORATORY</Text>
-                <Text style={styles.metaValue}>
-                  {laboratory?.name || `Laboratory ${experiment.laboratory_id}`}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* OBJECTIVE */}
-
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionNumber}>02</Text>
-            <Text style={styles.sectionTitle}>OBJECTIVE</Text>
-          </View>
-
-          <View style={styles.objectiveCard}>
-            <Text style={styles.objectiveText}>
-              {experiment.description || 'No experiment description has been added.'}
+          <View style={styles.observationCount}>
+            <Text style={styles.observationCountText}>
+              {records.length}
             </Text>
           </View>
+        </View>
 
-          {/* LINKED RECORDS */}
-
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionNumber}>03</Text>
-            <Text style={styles.sectionTitle}>LINKED RECORDS</Text>
-          </View>
-
-          <View style={styles.linkedCard}>
-            <View style={styles.linkedRow}>
-              <View style={styles.linkedIcon}>
-                <FlaskConical
-                  size={18}
-                  color={COLORS.green}
-                  strokeWidth={1.6}
-                />
-              </View>
-
-              <View style={styles.linkedInfo}>
-                <Text style={styles.linkedLabel}>SAMPLE</Text>
-                <Text style={styles.linkedValue}>
-                  Not linked yet
-                </Text>
-              </View>
+        {records.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <View style={styles.emptyIcon}>
+              <FileText size={21} color={C.primary} />
             </View>
-
-            <View style={styles.linkedDivider} />
-
-            <View style={styles.linkedRow}>
-              <View style={styles.linkedIcon}>
-                <Wrench
-                  size={18}
-                  color={COLORS.ochre}
-                  strokeWidth={1.6}
-                />
-              </View>
-
-              <View style={styles.linkedInfo}>
-                <Text style={styles.linkedLabel}>EQUIPMENT</Text>
-                <Text style={styles.linkedValue}>
-                  Not linked yet
-                </Text>
-              </View>
-            </View>
+            <Text style={styles.emptyTitle}>
+              No observations recorded
+            </Text>
+            <Text style={styles.emptyText}>
+              Add your first observation below to build the experiment
+              journal.
+            </Text>
           </View>
-
-          {/* OBSERVATIONS */}
-
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionNumber}>04</Text>
-            <Text style={styles.sectionTitle}>OBSERVATIONS</Text>
-          </View>
-
-          {records.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <View style={styles.emptyIcon}>
-                <FileText
-                  size={20}
-                  color={COLORS.muted}
-                  strokeWidth={1.5}
-                />
-              </View>
-
-              <Text style={styles.emptyTitle}>
-                No observations recorded
-              </Text>
-
-              <Text style={styles.emptyText}>
-                Experimental notes and observations will appear here
-                once entered.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.recordsList}>
-              {records.map((record) => (
-                <View key={record.id} style={styles.recordCard}>
-                  <View style={styles.recordHeader}>
+        ) : (
+          <View style={styles.recordsList}>
+            {records.map((record) => (
+              <View key={record.id} style={styles.recordCard}>
+                <View style={styles.recordHeader}>
+                  <View style={styles.recordTypeBadge}>
                     <Text style={styles.recordType}>
                       {record.record_type}
                     </Text>
-
-                    <Text style={styles.recordDate}>
-                      {formatDate(record.created_at)}
-                    </Text>
                   </View>
-
-                  <Text style={styles.recordNotes}>
-                    {record.notes}
+                  <Text style={styles.recordDate}>
+                    {formatDate(record.created_at)}
                   </Text>
+                </View>
 
+                <Text style={styles.recordNotes}>{record.notes}</Text>
+
+                <View style={styles.recordFooter}>
+                  <View style={styles.recordAuthorIcon}>
+                    <User size={12} color={C.primary} />
+                  </View>
                   <Text style={styles.recordAuthor}>
                     Recorded by {record.recorded_by}
                   </Text>
                 </View>
-              ))}
+              </View>
+            ))}
+          </View>
+        )}
+
+        <SectionHeading number="05" title="ADD OBSERVATION" />
+
+        <View style={styles.addRecordCard}>
+          <View style={styles.formIntro}>
+            <View style={styles.formIcon}>
+              <Plus size={18} color={C.primary} />
             </View>
-          )}
-
-          {/* ADD OBSERVATION */}
-
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionNumber}>05</Text>
-            <Text style={styles.sectionTitle}>ADD OBSERVATION</Text>
-          </View>
-
-          <View style={styles.addRecordCard}>
-            <Text style={styles.inputLabel}>RECORD TYPE</Text>
-
-            <TextInput
-              style={styles.recordInput}
-              value={recordType}
-              onChangeText={setRecordType}
-              placeholder="e.g. OBSERVATION"
-              placeholderTextColor={COLORS.muted}
-              autoCapitalize="characters"
-            />
-
-            <Text style={styles.inputLabel}>RECORDED BY</Text>
-
-            <TextInput
-              style={styles.recordInput}
-              value={recordedBy}
-              onChangeText={setRecordedBy}
-              placeholder="Enter your name"
-              placeholderTextColor={COLORS.muted}
-            />
-
-            <Text style={styles.inputLabel}>NOTES</Text>
-
-            <TextInput
-              style={[styles.recordInput, styles.notesInput]}
-              value={recordNotes}
-              onChangeText={setRecordNotes}
-              placeholder="Enter experiment observations..."
-              placeholderTextColor={COLORS.muted}
-              multiline
-              textAlignVertical="top"
-            />
-
-            <TouchableOpacity
-              style={[
-                styles.saveButton,
-                savingRecord && styles.saveButtonDisabled,
-              ]}
-              onPress={handleAddRecord}
-              disabled={savingRecord}
-            >
-              {savingRecord ? (
-                <ActivityIndicator color={COLORS.white} />
-              ) : (
-                <>
-                  <Plus size={16} color={COLORS.white} />
-                  <Text style={styles.saveButtonText}>
-                    SAVE OBSERVATION
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* ARCHIVAL STATUS */}
-
-          <View style={styles.archiveCard}>
-            <CheckCircle2
-              size={19}
-              color={COLORS.green}
-              strokeWidth={1.7}
-            />
-
-            <View style={styles.archiveInfo}>
-              <Text style={styles.archiveTitle}>
-                RECORD INDEXED
-              </Text>
-
-              <Text style={styles.archiveText}>
-                This experiment is stored in the laboratory database.
+            <View style={styles.formIntroText}>
+              <Text style={styles.formTitle}>New journal entry</Text>
+              <Text style={styles.formSubtitle}>
+                Document what happened during this experiment.
               </Text>
             </View>
           </View>
-        </ScrollView>
-      </View>
+
+          <Text style={styles.inputLabel}>RECORD TYPE</Text>
+          <TextInput
+            style={styles.recordInput}
+            value={recordType}
+            onChangeText={setRecordType}
+            placeholder="e.g. OBSERVATION"
+            placeholderTextColor={C.subtle}
+            autoCapitalize="characters"
+          />
+
+          <Text style={styles.inputLabel}>RECORDED BY</Text>
+          <TextInput
+            style={styles.recordInput}
+            value={recordedBy}
+            onChangeText={setRecordedBy}
+            placeholder="Enter your name"
+            placeholderTextColor={C.subtle}
+          />
+
+          <Text style={styles.inputLabel}>OBSERVATION NOTES</Text>
+          <TextInput
+            style={[styles.recordInput, styles.notesInput]}
+            value={recordNotes}
+            onChangeText={setRecordNotes}
+            placeholder="Describe your findings, measurements or observations..."
+            placeholderTextColor={C.subtle}
+            multiline
+            textAlignVertical="top"
+          />
+
+          <TouchableOpacity
+            style={[
+              styles.saveButton,
+              savingRecord && styles.saveButtonDisabled,
+            ]}
+            onPress={handleAddRecord}
+            disabled={savingRecord}
+          >
+            {savingRecord ? (
+              <ActivityIndicator color={C.white} />
+            ) : (
+              <>
+                <Plus size={17} color={C.white} />
+                <Text style={styles.saveButtonText}>
+                  SAVE OBSERVATION
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.archiveCard}>
+          <CheckCircle2 size={19} color={C.success} />
+          <View style={styles.archiveInfo}>
+            <Text style={styles.archiveTitle}>RECORD INDEXED</Text>
+            <Text style={styles.archiveText}>
+              This experiment is stored in the laboratory database.
+            </Text>
+          </View>
+        </View>
+
+        <Text style={styles.footer}>
+          LABSYNC · EXPERIMENT JOURNAL
+        </Text>
+      </ScrollView>
     </SafeAreaView>
   )
 }
@@ -597,448 +626,531 @@ export default function ExperimentDetailsScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: C.background,
   },
-
-  container: {
-    flex: 1,
-  },
-
   content: {
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingTop: 14,
     paddingBottom: 40,
   },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 20,
   },
-
   backButton: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
+    borderRadius: R.md,
+    backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.paper,
-    borderRadius: 19,
+    borderColor: C.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   headerText: {
     flex: 1,
     marginLeft: 12,
   },
-
   eyebrow: {
-    color: COLORS.ochre,
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-  },
-
-  recordId: {
-    color: COLORS.blue,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
-    marginTop: 3,
-  },
-
-  beakerIcon: {
-    width: 38,
-    height: 38,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.paper,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  rule: {
-    height: 1,
-    backgroundColor: COLORS.ink,
-    opacity: 0.15,
-    marginTop: 15,
-  },
-
-  titleBlock: {
-    paddingTop: 25,
-    paddingBottom: 25,
-  },
-
-  lab: {
-    color: COLORS.green,
-    fontSize: 8,
+    color: C.primary,
+    fontSize: 9,
     fontWeight: '800',
     letterSpacing: 1.3,
   },
-
-  title: {
-    color: COLORS.ink,
-    fontSize: 29,
+  recordId: {
+    color: C.muted,
+    fontSize: 10,
     fontWeight: '700',
-    lineHeight: 35,
-    marginTop: 7,
+    letterSpacing: 0.8,
+    marginTop: 4,
   },
-
-  status: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 3,
-    marginTop: 12,
+  headerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: R.md,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  statusProgress: {
-    backgroundColor: COLORS.softGreen,
+  heroCard: {
+    backgroundColor: C.primary,
+    borderRadius: R.xl,
+    padding: 19,
+    ...S.card,
   },
-
-  statusScheduled: {
-    backgroundColor: '#EEEDE7',
+  heroTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-
-  statusCompleted: {
-    backgroundColor: '#E7ECEC',
+  heroIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  statusText: {
-    fontSize: 7,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-  },
-
-  progressText: {
-    color: COLORS.green,
-  },
-
-  scheduledText: {
-    color: COLORS.ochre,
-  },
-
-  completedText: {
-    color: COLORS.blue,
-  },
-
-  sectionHeader: {
+  statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: R.pill,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  heroLab: {
+    color: '#C6DDD3',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginTop: 20,
+  },
+  heroTitle: {
+    color: C.white,
+    fontSize: 25,
+    fontWeight: '800',
+    letterSpacing: -0.7,
+    lineHeight: 32,
+    marginTop: 7,
+  },
+  heroFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 17,
+    marginTop: 19,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+  },
+  heroFooterItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  heroFooterText: {
+    color: '#E1EEE8',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  sectionHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 27,
     marginBottom: 12,
   },
-
   sectionNumber: {
-    color: COLORS.ochre,
+    color: C.accent,
     fontSize: 10,
     fontWeight: '800',
     marginRight: 8,
   },
-
   sectionTitle: {
-    color: COLORS.ink,
+    color: C.ink,
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 1.4,
+    letterSpacing: 1.3,
   },
-
   metadataCard: {
-    backgroundColor: COLORS.paper,
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
-    padding: 14,
-    gap: 17,
+    borderColor: C.border,
+    paddingHorizontal: 15,
+    ...S.card,
   },
-
-  metaItem: {
+  metadataItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 13,
   },
-
-  metaText: {
-    marginLeft: 12,
+  metadataIcon: {
+    width: 35,
+    height: 35,
+    borderRadius: 11,
+    backgroundColor: C.surfaceSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  metaLabel: {
-    color: COLORS.muted,
-    fontSize: 7,
+  metadataText: {
+    marginLeft: 11,
+    flex: 1,
+  },
+  metadataLabel: {
+    color: C.muted,
+    fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
-
-  metaValue: {
-    color: COLORS.ink,
+  metadataValue: {
+    color: C.ink,
     fontSize: 12,
-    fontWeight: '600',
-    marginTop: 3,
+    fontWeight: '700',
+    marginTop: 4,
   },
-
+  metadataDivider: {
+    height: 1,
+    backgroundColor: C.divider,
+  },
   objectiveCard: {
-    backgroundColor: COLORS.paper,
-    borderLeftWidth: 3,
-    borderLeftColor: COLORS.green,
-    borderTopWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: COLORS.border,
-    padding: 16,
-  },
-
-  objectiveText: {
-    color: COLORS.ink,
-    fontSize: 14,
-    lineHeight: 22,
-  },
-
-  linkedCard: {
-    backgroundColor: COLORS.paper,
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
-    paddingHorizontal: 14,
+    borderColor: C.border,
+    padding: 16,
+    ...S.card,
   },
-
+  objectiveHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    marginBottom: 12,
+  },
+  objectiveIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  objectiveLabel: {
+    color: C.primary,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  objectiveText: {
+    color: C.text,
+    fontSize: 13,
+    lineHeight: 21,
+  },
+  linkedCard: {
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 15,
+    ...S.card,
+  },
   linkedRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 13,
   },
-
   linkedIcon: {
-    width: 36,
-    height: 36,
-    backgroundColor: COLORS.softGreen,
-    borderRadius: 18,
+    width: 37,
+    height: 37,
+    borderRadius: 12,
+    backgroundColor: C.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
+  equipmentIcon: {
+    backgroundColor: C.warningLight,
+  },
   linkedInfo: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 11,
   },
-
   linkedLabel: {
-    color: COLORS.muted,
-    fontSize: 7,
+    color: C.muted,
+    fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
-
   linkedValue: {
-    color: COLORS.ink,
-    fontSize: 12,
+    color: C.ink,
+    fontSize: 11,
     fontWeight: '600',
     marginTop: 4,
   },
-
   linkedDivider: {
     height: 1,
-    backgroundColor: COLORS.border,
+    backgroundColor: C.divider,
   },
-
-  emptyCard: {
-    backgroundColor: COLORS.paper,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
-    padding: 20,
+  observationHeading: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-
-  emptyIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#ECEDEA',
+  observationSubtitle: {
+    color: C.muted,
+    fontSize: 10,
+    marginTop: -7,
+    marginBottom: 12,
+  },
+  observationCount: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: C.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  emptyTitle: {
-    color: COLORS.ink,
+  observationCountText: {
+    color: C.primary,
     fontSize: 12,
-    fontWeight: '700',
-    marginTop: 10,
+    fontWeight: '800',
   },
-
-  emptyText: {
-    color: COLORS.muted,
-    fontSize: 9,
-    lineHeight: 15,
-    textAlign: 'center',
-    maxWidth: 260,
-    marginTop: 5,
-  },
-
-  recordsList: {
-    gap: 9,
-  },
-
-  recordCard: {
-    backgroundColor: COLORS.paper,
+  emptyCard: {
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
-    padding: 14,
+    borderColor: C.border,
+    alignItems: 'center',
+    padding: 23,
   },
-
+  emptyIcon: {
+    width: 45,
+    height: 45,
+    borderRadius: 15,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyTitle: {
+    color: C.ink,
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 12,
+  },
+  emptyText: {
+    color: C.muted,
+    fontSize: 10,
+    lineHeight: 16,
+    textAlign: 'center',
+    marginTop: 6,
+    maxWidth: 260,
+  },
+  recordsList: {
+    gap: 10,
+  },
+  recordCard: {
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 15,
+    ...S.card,
+  },
   recordHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-
-  recordType: {
-    color: COLORS.green,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.8,
+  recordTypeBadge: {
+    backgroundColor: C.primaryLight,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: R.pill,
   },
-
-  recordDate: {
-    color: COLORS.muted,
+  recordType: {
+    color: C.primary,
     fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  recordDate: {
+    color: C.muted,
+    fontSize: 9,
     fontWeight: '700',
   },
-
   recordNotes: {
-    color: COLORS.ink,
+    color: C.text,
     fontSize: 12,
     lineHeight: 19,
-    marginTop: 10,
+    marginTop: 13,
   },
-
+  recordFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 13,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: C.divider,
+  },
+  recordAuthorIcon: {
+    width: 23,
+    height: 23,
+    borderRadius: 12,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   recordAuthor: {
-    color: COLORS.muted,
+    color: C.muted,
     fontSize: 9,
-    marginTop: 10,
+    fontWeight: '600',
   },
-
   addRecordCard: {
-    backgroundColor: COLORS.paper,
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
-    padding: 14,
-    gap: 9,
+    borderColor: C.border,
+    padding: 15,
+    ...S.card,
   },
-
+  formIntro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    marginBottom: 18,
+  },
+  formIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  formIntroText: {
+    flex: 1,
+  },
+  formTitle: {
+    color: C.ink,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  formSubtitle: {
+    color: C.muted,
+    fontSize: 10,
+    marginTop: 4,
+  },
   inputLabel: {
-    color: COLORS.muted,
+    color: C.muted,
     fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 1,
-    marginTop: 5,
+    letterSpacing: 0.9,
+    marginBottom: 7,
+    marginTop: 12,
   },
-
   recordInput: {
-    backgroundColor: COLORS.white,
+    backgroundColor: C.background,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
+    borderColor: C.border,
+    borderRadius: R.md,
     paddingHorizontal: 12,
-    paddingVertical: 11,
-    color: COLORS.ink,
+    paddingVertical: 12,
+    color: C.ink,
     fontSize: 12,
   },
-
   notesInput: {
-    minHeight: 100,
+    minHeight: 110,
   },
-
   saveButton: {
-    backgroundColor: COLORS.green,
-    borderRadius: 4,
-    paddingVertical: 13,
+    backgroundColor: C.primary,
+    borderRadius: R.md,
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 8,
+    marginTop: 18,
   },
-
   saveButtonDisabled: {
     opacity: 0.6,
   },
-
   saveButtonText: {
-    color: COLORS.white,
+    color: C.white,
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.8,
   },
-
   archiveCard: {
-    marginTop: 24,
+    marginTop: 23,
     padding: 14,
-    backgroundColor: COLORS.softGreen,
+    backgroundColor: C.successLight,
+    borderRadius: R.md,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 4,
+    gap: 10,
   },
-
   archiveInfo: {
     flex: 1,
-    marginLeft: 10,
   },
-
   archiveTitle: {
-    color: COLORS.green,
+    color: C.success,
     fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 1,
+    letterSpacing: 0.9,
   },
-
   archiveText: {
-    color: COLORS.muted,
+    color: C.text,
     fontSize: 9,
     lineHeight: 14,
-    marginTop: 3,
+    marginTop: 4,
   },
-
-  messageContainer: {
+  footer: {
+    color: C.subtle,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textAlign: 'center',
+    marginTop: 25,
+  },
+  centerState: {
     flex: 1,
-    padding: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 14,
-    backgroundColor: COLORS.background,
+    padding: 30,
+    gap: 13,
+    backgroundColor: C.background,
   },
-
-  messageText: {
-    color: COLORS.muted,
-    fontSize: 13,
-    textAlign: 'center',
+  stateText: {
+    color: C.muted,
+    fontSize: 12,
   },
-
+  errorIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: C.dangerLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorTitle: {
+    color: C.ink,
+    fontSize: 15,
+    fontWeight: '800',
+  },
   errorText: {
-    color: COLORS.brick,
-    fontSize: 13,
+    color: C.danger,
+    fontSize: 12,
     textAlign: 'center',
+    lineHeight: 18,
   },
-
   retryButton: {
-    backgroundColor: COLORS.green,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
-    borderRadius: 4,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    backgroundColor: C.primary,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: R.md,
+    marginTop: 5,
   },
-
   retryText: {
-    color: COLORS.white,
+    color: C.white,
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.8,
   },
-
   backText: {
-    color: COLORS.green,
+    color: C.primary,
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.8,

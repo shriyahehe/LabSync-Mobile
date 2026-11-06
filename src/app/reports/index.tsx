@@ -1,57 +1,87 @@
+
 import { router } from 'expo-router'
 import {
-    ArrowLeft,
-    BarChart3,
-    CalendarDays,
-    ChevronRight,
-    Download,
-    FileSpreadsheet,
-    FileText,
-    Package,
-    Wrench,
+  ArrowLeft,
+  BarChart3,
+  CalendarDays,
+  ChevronRight,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Package,
+  Wrench,
 } from 'lucide-react-native'
 import {
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native'
 
-const COLORS = {
-  background: '#F5F3EC',
-  paper: '#FCFBF7',
-  ink: '#172A36',
-  muted: '#65747C',
-  green: '#176B63',
-  softGreen: '#DCE9E3',
-  blue: '#527A8A',
-  ochre: '#B77932',
-  brick: '#B84A42',
-  border: '#D8DDD8',
-  white: '#FFFFFF',
-}
+import {
+  LabSyncColors as C,
+  LabSyncRadius as R,
+  LabSyncShadows as S,
+  LabSyncSpacing as SP,
+  LabSyncTypography as T,
+} from '@/constants/labsync-theme'
 
 const reportStats = [
   {
     value: '12',
     label: 'EXPERIMENTS',
     icon: BarChart3,
+    color: C.primary,
+    background: C.primaryLight,
   },
   {
     value: '28',
     label: 'SAMPLES',
     icon: FileText,
+    color: C.secondary,
+    background: C.secondaryLight,
   },
   {
     value: '31',
     label: 'MATERIALS',
     icon: Package,
+    color: C.accent,
+    background: C.accentLight,
   },
   {
     value: '06',
     label: 'EQUIPMENT',
+    icon: Wrench,
+    color: C.primary,
+    background: C.primaryLight,
+  },
+]
+
+const reportSections = [
+  {
+    number: '01',
+    title: 'Experiment Activity',
+    description: 'Experiments conducted and completed during the month.',
+    icon: BarChart3,
+  },
+  {
+    number: '02',
+    title: 'Sample Register',
+    description: 'Samples added, processed and archived.',
+    icon: FileText,
+  },
+  {
+    number: '03',
+    title: 'Material Inventory',
+    description: 'Material usage, stock levels and procurement.',
+    icon: Package,
+  },
+  {
+    number: '04',
+    title: 'Equipment Activity',
+    description: 'Equipment usage and maintenance records.',
     icon: Wrench,
   },
 ]
@@ -64,86 +94,68 @@ export default function ReportsScreen() {
         contentContainerStyle={styles.content}
       >
         {/* HEADER */}
-
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
+            accessibilityLabel="Go back"
           >
-            <ArrowLeft
-              size={19}
-              color={COLORS.ink}
-              strokeWidth={1.8}
-            />
+            <ArrowLeft size={19} color={C.ink} strokeWidth={1.8} />
           </TouchableOpacity>
 
           <View style={styles.headerText}>
-            <Text style={styles.eyebrow}>
-              ARCHIVAL RECORDS
+            <Text style={styles.eyebrow}>LABORATORY INSIGHTS</Text>
+            <Text style={styles.title}>Reports</Text>
+            <Text style={styles.subtitle}>
+              Your monthly laboratory overview.
             </Text>
-
-            <Text style={styles.title}>Monthly Report</Text>
           </View>
 
           <View style={styles.headerIcon}>
-            <FileSpreadsheet
-              size={19}
-              color={COLORS.green}
-              strokeWidth={1.6}
-            />
+            <FileSpreadsheet size={20} color={C.primary} />
           </View>
         </View>
-
-        <View style={styles.rule} />
 
         {/* REPORT PERIOD */}
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionNumber}>01</Text>
-
-          <Text style={styles.sectionTitle}>
-            REPORT PERIOD
-          </Text>
-        </View>
-
         <View style={styles.periodCard}>
-          <View style={styles.calendarIcon}>
-            <CalendarDays
-              size={21}
-              color={COLORS.green}
-              strokeWidth={1.6}
-            />
+          <View style={styles.periodTop}>
+            <Text style={styles.periodEyebrow}>CURRENT REPORT</Text>
+            <View style={styles.currentBadge}>
+              <View style={styles.currentDot} />
+              <Text style={styles.currentText}>MONTHLY</Text>
+            </View>
           </View>
 
-          <View style={styles.periodInfo}>
-            <Text style={styles.periodLabel}>
-              CURRENT REPORT
-            </Text>
+          <View style={styles.periodMain}>
+            <View style={styles.calendarIcon}>
+              <CalendarDays size={23} color={C.primary} strokeWidth={1.8} />
+            </View>
 
-            <Text style={styles.periodTitle}>
-              September 2026
-            </Text>
+            <View style={styles.periodInfo}>
+              <Text style={styles.periodTitle}>September 2026</Text>
+              <Text style={styles.periodDate}>01 SEP — 30 SEP 2026</Text>
+            </View>
 
-            <Text style={styles.periodText}>
-              01 SEP — 30 SEP 2026
-            </Text>
+            <ChevronRight size={19} color={C.muted} />
           </View>
 
-          <ChevronRight
-            size={18}
-            color={COLORS.muted}
-            strokeWidth={1.6}
-          />
+          <View style={styles.periodFooter}>
+            <Text style={styles.periodFooterText}>
+              LABORATORY REPORTING PERIOD
+            </Text>
+            <Text style={styles.periodFooterText}>30 DAYS</Text>
+          </View>
         </View>
 
         {/* SUMMARY */}
-
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionNumber}>02</Text>
-
-          <Text style={styles.sectionTitle}>
-            MONTHLY SUMMARY
-          </Text>
+          <View>
+            <Text style={styles.sectionEyebrow}>AT A GLANCE</Text>
+            <Text style={styles.sectionTitle}>Monthly summary</Text>
+          </View>
+          <View style={styles.sectionIcon}>
+            <BarChart3 size={18} color={C.primary} />
+          </View>
         </View>
 
         <View style={styles.statsGrid}>
@@ -152,394 +164,455 @@ export default function ReportsScreen() {
 
             return (
               <View key={stat.label} style={styles.statCard}>
-                <Icon
-                  size={18}
-                  color={COLORS.green}
-                  strokeWidth={1.6}
-                />
+                <View
+                  style={[
+                    styles.statIcon,
+                    { backgroundColor: stat.background },
+                  ]}
+                >
+                  <Icon size={18} color={stat.color} strokeWidth={1.8} />
+                </View>
 
-                <Text style={styles.statValue}>
-                  {stat.value}
-                </Text>
-
-                <Text style={styles.statLabel}>
-                  {stat.label}
-                </Text>
+                <Text style={styles.statValue}>{stat.value}</Text>
+                <Text style={styles.statLabel}>{stat.label}</Text>
               </View>
             )
           })}
         </View>
 
-        {/* REPORT SECTIONS */}
-
+        {/* REPORT CONTENT */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionNumber}>03</Text>
-
-          <Text style={styles.sectionTitle}>
-            REPORT CONTENT
-          </Text>
+          <View>
+            <Text style={styles.sectionEyebrow}>REPORT BREAKDOWN</Text>
+            <Text style={styles.sectionTitle}>What's included</Text>
+          </View>
+          <View style={styles.countBadge}>
+            <Text style={styles.countText}>04</Text>
+          </View>
         </View>
 
         <View style={styles.contentCard}>
-          <ReportRow
-            number="01"
-            title="Experiment Activity"
-            description="Experiments conducted and completed during the month."
-          />
+          {reportSections.map((section, index) => {
+            const Icon = section.icon
 
-          <View style={styles.rowDivider} />
+            return (
+              <View key={section.number}>
+                <View style={styles.reportRow}>
+                  <View style={styles.rowNumberContainer}>
+                    <Text style={styles.rowNumber}>{section.number}</Text>
+                  </View>
 
-          <ReportRow
-            number="02"
-            title="Sample Register"
-            description="Samples added, processed and archived."
-          />
+                  <View style={styles.rowIcon}>
+                    <Icon size={17} color={C.primary} strokeWidth={1.7} />
+                  </View>
 
-          <View style={styles.rowDivider} />
+                  <View style={styles.rowInfo}>
+                    <Text style={styles.rowTitle}>{section.title}</Text>
+                    <Text style={styles.rowDescription}>
+                      {section.description}
+                    </Text>
+                  </View>
 
-          <ReportRow
-            number="03"
-            title="Material Inventory"
-            description="Material usage, stock levels and procurement."
-          />
+                  <ChevronRight size={17} color={C.subtle} />
+                </View>
 
-          <View style={styles.rowDivider} />
-
-          <ReportRow
-            number="04"
-            title="Equipment Activity"
-            description="Equipment usage and maintenance records."
-          />
+                {index !== reportSections.length - 1 && (
+                  <View style={styles.rowDivider} />
+                )}
+              </View>
+            )
+          })}
         </View>
 
-        {/* DOWNLOAD */}
+        {/* EXPORT */}
+        <View style={styles.exportCard}>
+          <View style={styles.exportTop}>
+            <View style={styles.exportIcon}>
+              <FileSpreadsheet size={22} color={C.primary} />
+            </View>
 
-        <View style={styles.downloadCard}>
-          <View style={styles.downloadIcon}>
-            <FileSpreadsheet
-              size={22}
-              color={COLORS.green}
-              strokeWidth={1.6}
-            />
+            <View style={styles.exportBadge}>
+              <Text style={styles.exportBadgeText}>XLS FORMAT</Text>
+            </View>
           </View>
 
-          <View style={styles.downloadInfo}>
-            <Text style={styles.downloadTitle}>
-              MONTHLY INVENTORY REPORT
-            </Text>
+          <Text style={styles.exportTitle}>Monthly inventory report</Text>
 
-            <Text style={styles.downloadText}>
-              Download the complete laboratory record as an
-              Excel-compatible spreadsheet.
-            </Text>
-          </View>
+          <Text style={styles.exportDescription}>
+            Complete laboratory records in an Excel-compatible spreadsheet.
+          </Text>
 
-          <TouchableOpacity style={styles.downloadButton}>
-            <Download
-              size={17}
-              color={COLORS.white}
-              strokeWidth={2}
-            />
+          <TouchableOpacity
+            style={styles.downloadButton}
+            activeOpacity={0.8}
+            accessibilityLabel="Download monthly inventory report"
+          >
+            <Download size={17} color={C.white} strokeWidth={2} />
+            <Text style={styles.downloadButtonText}>Download report</Text>
           </TouchableOpacity>
+
+          <Text style={styles.exportFootnote}>
+            Export functionality will be connected separately.
+          </Text>
         </View>
 
-        <Text style={styles.footerNote}>
-          LABSYNC · LABORATORY FIELD REGISTER · SEP 2026
-        </Text>
+        <View style={styles.footer}>
+          <View style={styles.footerLine} />
+          <Text style={styles.footerText}>
+            LABSYNC · LABORATORY FIELD REGISTER · SEP 2026
+          </Text>
+          <View style={styles.footerLine} />
+        </View>
       </ScrollView>
     </SafeAreaView>
-  )
-}
-
-function ReportRow({
-  number,
-  title,
-  description,
-}: {
-  number: string
-  title: string
-  description: string
-}) {
-  return (
-    <View style={styles.reportRow}>
-      <Text style={styles.rowNumber}>{number}</Text>
-
-      <View style={styles.rowInfo}>
-        <Text style={styles.rowTitle}>{title}</Text>
-
-        <Text style={styles.rowDescription}>
-          {description}
-        </Text>
-      </View>
-
-      <ChevronRight
-        size={17}
-        color={COLORS.muted}
-        strokeWidth={1.6}
-      />
-    </View>
   )
 }
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: C.background,
   },
-
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 40,
+    paddingHorizontal: SP.lg,
+    paddingTop: SP.sm,
+    paddingBottom: SP.xxxl,
   },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: SP.xl,
   },
-
   backButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 42,
+    height: 42,
+    borderRadius: R.pill,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.paper,
+    borderColor: C.border,
+    backgroundColor: C.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   headerText: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: SP.md,
   },
-
   eyebrow: {
-    color: COLORS.ochre,
-    fontSize: 8,
+    color: C.accent,
+    fontSize: T.eyebrow,
     fontWeight: '800',
-    letterSpacing: 1.3,
+    letterSpacing: 1.2,
   },
-
   title: {
-    color: COLORS.ink,
-    fontSize: 27,
-    fontWeight: '700',
+    color: C.ink,
+    fontSize: T.heading1,
+    fontWeight: '800',
     marginTop: 2,
   },
-
+  subtitle: {
+    color: C.muted,
+    fontSize: T.bodySmall,
+    marginTop: 3,
+  },
   headerIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 42,
+    height: 42,
+    borderRadius: R.pill,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.paper,
+    borderColor: C.border,
+    backgroundColor: C.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  rule: {
-    height: 1,
-    backgroundColor: COLORS.ink,
-    opacity: 0.15,
-    marginVertical: 16,
-  },
-
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 12,
-  },
-
-  sectionNumber: {
-    color: COLORS.ochre,
-    fontSize: 10,
-    fontWeight: '800',
-    marginRight: 8,
-  },
-
-  sectionTitle: {
-    color: COLORS.ink,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-  },
-
   periodCard: {
-    backgroundColor: COLORS.paper,
+    backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
-    padding: 14,
+    borderColor: C.border,
+    borderRadius: R.xl,
+    padding: SP.lg,
+    ...S.card,
+  },
+  periodTop: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-
-  calendarIcon: {
-    width: 43,
-    height: 43,
-    borderRadius: 22,
-    backgroundColor: COLORS.softGreen,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  periodInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-
-  periodLabel: {
-    color: COLORS.muted,
-    fontSize: 7,
+  periodEyebrow: {
+    color: C.muted,
+    fontSize: T.eyebrow,
     fontWeight: '800',
     letterSpacing: 1,
   },
-
-  periodTitle: {
-    color: COLORS.ink,
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: 3,
+  currentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: C.successLight,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: R.pill,
   },
-
-  periodText: {
-    color: COLORS.blue,
+  currentDot: {
+    width: 6,
+    height: 6,
+    borderRadius: R.pill,
+    backgroundColor: C.success,
+  },
+  currentText: {
+    color: C.success,
     fontSize: 8,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0.6,
-    marginTop: 3,
   },
-
+  periodMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SP.lg,
+  },
+  calendarIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: R.lg,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  periodInfo: {
+    flex: 1,
+    marginLeft: SP.md,
+  },
+  periodTitle: {
+    color: C.ink,
+    fontSize: T.heading2,
+    fontWeight: '800',
+  },
+  periodDate: {
+    color: C.secondary,
+    fontSize: T.caption,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginTop: 5,
+  },
+  periodFooter: {
+    borderTopWidth: 1,
+    borderTopColor: C.divider,
+    marginTop: SP.lg,
+    paddingTop: SP.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  periodFooterText: {
+    color: C.muted,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: SP.xl,
+    marginBottom: SP.md,
+  },
+  sectionEyebrow: {
+    color: C.accent,
+    fontSize: T.eyebrow,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+  },
+  sectionTitle: {
+    color: C.ink,
+    fontSize: T.heading2,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  sectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: R.md,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    justifyContent: 'space-between',
+    rowGap: SP.md,
   },
-
   statCard: {
     width: '48%',
-    backgroundColor: COLORS.paper,
+    backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
-    padding: 14,
+    borderColor: C.border,
+    borderRadius: R.xl,
+    padding: SP.md,
+    ...S.card,
   },
-
-  statValue: {
-    color: COLORS.ink,
-    fontSize: 25,
-    fontWeight: '700',
-    marginTop: 10,
-  },
-
-  statLabel: {
-    color: COLORS.green,
-    fontSize: 7,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    marginTop: 2,
-  },
-
-  contentCard: {
-    backgroundColor: COLORS.paper,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
-    paddingHorizontal: 14,
-  },
-
-  reportRow: {
-    minHeight: 67,
-    flexDirection: 'row',
+  statIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: R.md,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  rowNumber: {
-    color: COLORS.ochre,
+  statValue: {
+    color: C.ink,
+    fontSize: 27,
+    fontWeight: '800',
+    marginTop: SP.md,
+    fontVariant: ['tabular-nums'],
+  },
+  statLabel: {
+    color: C.muted,
     fontSize: 9,
     fontWeight: '800',
-    width: 28,
-  },
-
-  rowInfo: {
-    flex: 1,
-    paddingRight: 10,
-  },
-
-  rowTitle: {
-    color: COLORS.ink,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  rowDescription: {
-    color: COLORS.muted,
-    fontSize: 8,
-    lineHeight: 13,
+    letterSpacing: 0.8,
     marginTop: 3,
   },
-
-  rowDivider: {
-    height: 1,
-    backgroundColor: COLORS.border,
+  countBadge: {
+    minWidth: 32,
+    height: 32,
+    paddingHorizontal: 9,
+    borderRadius: R.pill,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  downloadCard: {
-    marginTop: 24,
-    backgroundColor: COLORS.softGreen,
-    borderRadius: 4,
-    padding: 14,
+  countText: {
+    color: C.primary,
+    fontSize: T.bodySmall,
+    fontWeight: '800',
+  },
+  contentCard: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.xl,
+    paddingHorizontal: SP.md,
+    ...S.card,
+  },
+  reportRow: {
+    minHeight: 82,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: SP.sm,
   },
-
-  downloadIcon: {
-    width: 43,
-    height: 43,
-    borderRadius: 22,
-    backgroundColor: COLORS.paper,
+  rowNumberContainer: {
+    width: 27,
+  },
+  rowNumber: {
+    color: C.accent,
+    fontSize: T.bodySmall,
+    fontWeight: '800',
+  },
+  rowIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: R.md,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SP.sm,
+  },
+  rowInfo: {
+    flex: 1,
+    paddingRight: SP.sm,
+  },
+  rowTitle: {
+    color: C.ink,
+    fontSize: T.body,
+    fontWeight: '800',
+  },
+  rowDescription: {
+    color: C.muted,
+    fontSize: T.caption,
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: C.divider,
+  },
+  exportCard: {
+    marginTop: SP.xl,
+    backgroundColor: C.primaryLight,
+    borderRadius: R.xl,
+    padding: SP.lg,
+  },
+  exportTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  exportIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: R.lg,
+    backgroundColor: C.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  downloadInfo: {
-    flex: 1,
-    marginLeft: 11,
-    paddingRight: 8,
+  exportBadge: {
+    backgroundColor: C.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: R.pill,
   },
-
-  downloadTitle: {
-    color: COLORS.green,
+  exportBadgeText: {
+    color: C.primary,
     fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    letterSpacing: 0.7,
   },
-
-  downloadText: {
-    color: COLORS.muted,
-    fontSize: 8,
-    lineHeight: 13,
-    marginTop: 3,
+  exportTitle: {
+    color: C.ink,
+    fontSize: T.heading3,
+    fontWeight: '800',
+    marginTop: SP.md,
   },
-
+  exportDescription: {
+    color: C.text,
+    fontSize: T.bodySmall,
+    lineHeight: 19,
+    marginTop: SP.xs,
+  },
   downloadButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: COLORS.green,
+    height: 46,
+    borderRadius: R.lg,
+    backgroundColor: C.primary,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: SP.sm,
+    marginTop: SP.lg,
   },
-
-  footerNote: {
+  downloadButtonText: {
+    color: C.white,
+    fontSize: T.bodySmall,
+    fontWeight: '800',
+  },
+  exportFootnote: {
+    color: C.muted,
+    fontSize: T.caption,
     textAlign: 'center',
-    color: COLORS.muted,
+    marginTop: SP.sm,
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SP.sm,
+    marginTop: SP.xxl,
+  },
+  footerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: C.border,
+  },
+  footerText: {
+    color: C.subtle,
     fontSize: 7,
-    fontWeight: '700',
-    letterSpacing: 0.7,
-    marginTop: 28,
+    fontWeight: '800',
+    letterSpacing: 0.6,
   },
 })

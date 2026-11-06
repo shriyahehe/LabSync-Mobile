@@ -1,18 +1,17 @@
 
 import { router, useFocusEffect } from 'expo-router'
-
 import {
   AlertTriangle,
   ArrowLeft,
   Beaker,
   ChevronRight,
   Filter,
+  FlaskConical,
+  Package,
   Plus,
   Search,
 } from 'lucide-react-native'
-
 import { useCallback, useMemo, useState } from 'react'
-
 import {
   ActivityIndicator,
   Alert,
@@ -27,6 +26,12 @@ import {
 } from 'react-native'
 
 import {
+  LabSyncColors as C,
+  LabSyncRadius as R,
+  LabSyncShadows as S,
+} from '@/constants/labsync-theme'
+
+import {
   getLaboratories,
   getMaterials,
 } from '@/services/api'
@@ -35,20 +40,6 @@ import type {
   Laboratory,
   Material,
 } from '@/services/types'
-
-const COLORS = {
-  background: '#F5F3EC',
-  paper: '#FCFBF7',
-  ink: '#172A36',
-  muted: '#65747C',
-  green: '#176B63',
-  softGreen: '#DCE9E3',
-  blue: '#527A8A',
-  ochre: '#B77932',
-  brick: '#B84A42',
-  border: '#D8DDD8',
-  white: '#FFFFFF',
-}
 
 export default function MaterialsScreen() {
   const [materials, setMaterials] = useState<Material[]>([])
@@ -89,25 +80,19 @@ export default function MaterialsScreen() {
   )
 
   const laboratoryMap = useMemo(
-    () =>
-      new Map(
-        laboratories.map((lab) => [lab.id, lab])
-      ),
+    () => new Map(laboratories.map((lab) => [lab.id, lab])),
     [laboratories]
   )
 
   const lowStockCount = materials.filter(
-    (material) =>
-      material.quantity <= material.minimum_quantity
+    (material) => material.quantity <= material.minimum_quantity
   ).length
 
   const filteredMaterials = useMemo(() => {
     const query = search.trim().toLowerCase()
 
     return materials.filter((material) => {
-      const laboratory = laboratoryMap.get(
-        material.laboratory_id
-      )
+      const laboratory = laboratoryMap.get(material.laboratory_id)
 
       const matchesSearch = [
         material.name,
@@ -115,9 +100,7 @@ export default function MaterialsScreen() {
         material.unit,
         laboratory?.name ?? '',
         laboratory?.department ?? '',
-      ].some((value) =>
-        value.toLowerCase().includes(query)
-      )
+      ].some((value) => value.toLowerCase().includes(query))
 
       const matchesStock =
         !lowStockOnly ||
@@ -135,10 +118,12 @@ export default function MaterialsScreen() {
   const formatQuantity = (quantity: number) =>
     Number(quantity).toLocaleString('en-IN')
 
-  const getMaterialStatus = (material: Material) =>
-    material.quantity <= material.minimum_quantity
-      ? 'LOW STOCK'
-      : 'IN STOCK'
+  const openAddMaterial = () => {
+    Alert.alert(
+      'Add Material',
+      'Material registration will be implemented in the next stage.'
+    )
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -149,65 +134,41 @@ export default function MaterialsScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={COLORS.green}
-            colors={[COLORS.green]}
+            tintColor={C.primary}
+            colors={[C.primary]}
           />
         }
       >
-        {/* HEADER */}
-
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
           >
-            <ArrowLeft
-              size={19}
-              color={COLORS.ink}
-              strokeWidth={1.8}
-            />
+            <ArrowLeft size={19} color={C.ink} />
           </TouchableOpacity>
 
           <View style={styles.headerText}>
-            <Text style={styles.eyebrow}>
-              LABORATORY INVENTORY
-            </Text>
-
+            <Text style={styles.eyebrow}>LABORATORY INVENTORY</Text>
             <Text style={styles.title}>Materials</Text>
+            <Text style={styles.subtitle}>
+              Track and manage your laboratory supplies.
+            </Text>
           </View>
 
           <TouchableOpacity
             style={styles.addButton}
-            onPress={() =>
-              Alert.alert(
-                'Add Material',
-                'Material registration will be implemented in the next stage.'
-              )
-            }
+            onPress={openAddMaterial}
           >
-            <Plus
-              size={19}
-              color={COLORS.white}
-              strokeWidth={2}
-            />
+            <Plus size={20} color={C.white} />
           </TouchableOpacity>
         </View>
 
-        <View style={styles.rule} />
-
-        {/* SEARCH AND FILTER */}
-
         <View style={styles.searchRow}>
           <View style={styles.searchBox}>
-            <Search
-              size={17}
-              color={COLORS.muted}
-              strokeWidth={1.7}
-            />
-
+            <Search size={17} color={C.muted} />
             <TextInput
               placeholder="Search materials..."
-              placeholderTextColor={COLORS.muted}
+              placeholderTextColor={C.subtle}
               style={styles.searchInput}
               value={search}
               onChangeText={setSearch}
@@ -223,93 +184,89 @@ export default function MaterialsScreen() {
           >
             <Filter
               size={18}
-              color={
-                lowStockOnly
-                  ? COLORS.white
-                  : COLORS.green
-              }
-              strokeWidth={1.7}
+              color={lowStockOnly ? C.white : C.primary}
             />
           </TouchableOpacity>
         </View>
 
         {lowStockOnly && (
-          <Text style={styles.filterHint}>
-            Showing low-stock materials only. Tap the filter to show all.
-          </Text>
+          <TouchableOpacity
+            style={styles.filterHint}
+            onPress={() => setLowStockOnly(false)}
+          >
+            <Text style={styles.filterHintText}>
+              Showing low-stock materials · Clear filter
+            </Text>
+          </TouchableOpacity>
         )}
 
-        {/* INVENTORY SUMMARY */}
-
-        <View style={styles.summary}>
-          <View>
-            <Text style={styles.summaryNumber}>
-              {materials.length.toString().padStart(2, '0')}
-            </Text>
-            <Text style={styles.summaryLabel}>
-              MATERIALS
-            </Text>
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryHeading}>
+            <View style={styles.summaryIcon}>
+              <Package size={17} color={C.primary} />
+            </View>
+            <Text style={styles.summaryTitle}>Inventory overview</Text>
           </View>
 
-          <View style={styles.summaryDivider} />
+          <View style={styles.summaryStats}>
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>
+                {materials.length.toString().padStart(2, '0')}
+              </Text>
+              <Text style={styles.summaryLabel}>MATERIALS</Text>
+            </View>
 
-          <View>
-            <Text style={styles.summaryNumber}>
-              {lowStockCount.toString().padStart(2, '0')}
-            </Text>
-            <Text style={styles.summaryLabel}>
-              LOW STOCK
-            </Text>
-          </View>
+            <View style={styles.summaryDivider} />
 
-          <View style={styles.summaryDivider} />
+            <View style={styles.summaryItem}>
+              <Text
+                style={[
+                  styles.summaryValue,
+                  lowStockCount > 0 && styles.warningValue,
+                ]}
+              >
+                {lowStockCount.toString().padStart(2, '0')}
+              </Text>
+              <Text style={styles.summaryLabel}>LOW STOCK</Text>
+            </View>
 
-          <View>
-            <Text style={styles.summaryNumber}>
-              {laboratories.length.toString().padStart(2, '0')}
-            </Text>
-            <Text style={styles.summaryLabel}>
-              LABORATORIES
-            </Text>
+            <View style={styles.summaryDivider} />
+
+            <View style={styles.summaryItem}>
+              <Text style={styles.summaryValue}>
+                {laboratories.length.toString().padStart(2, '0')}
+              </Text>
+              <Text style={styles.summaryLabel}>LABS</Text>
+            </View>
           </View>
         </View>
-
-        {/* MATERIAL REGISTER */}
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionNumber}>01</Text>
-
-          <Text style={styles.sectionTitle}>
-            MATERIAL REGISTER
-          </Text>
+          <View>
+            <Text style={styles.sectionTitle}>Material register</Text>
+            <Text style={styles.sectionSubtitle}>
+              {filteredMaterials.length} materials displayed
+            </Text>
+          </View>
+          <View style={styles.sectionIcon}>
+            <FlaskConical size={17} color={C.primary} />
+          </View>
         </View>
-
-        {/* LOADING */}
 
         {loading && (
           <View style={styles.stateContainer}>
-            <ActivityIndicator
-              size="large"
-              color={COLORS.green}
-            />
+            <ActivityIndicator size="large" color={C.primary} />
             <Text style={styles.stateText}>
               Loading laboratory inventory...
             </Text>
           </View>
         )}
 
-        {/* ERROR */}
-
         {!loading && !!error && (
-          <View style={styles.stateContainer}>
-            <AlertTriangle
-              size={25}
-              color={COLORS.brick}
-            />
-
-            <Text style={styles.errorText}>
-              {error}
-            </Text>
+          <View style={styles.stateCard}>
+            <AlertTriangle size={27} color={C.danger} />
+            <Text style={styles.errorTitle}>Unable to load materials</Text>
+            <Text style={styles.errorText}>{error}</Text>
 
             <TouchableOpacity
               style={styles.retryButton}
@@ -318,28 +275,19 @@ export default function MaterialsScreen() {
                 loadData()
               }}
             >
-              <Text style={styles.retryText}>
-                Try Again
-              </Text>
+              <Text style={styles.retryText}>Try again</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* MATERIAL CARDS */}
-
         {!loading && !error && (
           <View style={styles.list}>
             {filteredMaterials.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Beaker
-                  size={27}
-                  color={COLORS.muted}
-                />
-
-                <Text style={styles.emptyTitle}>
-                  No materials found
-                </Text>
-
+              <View style={styles.stateCard}>
+                <View style={styles.emptyIcon}>
+                  <Beaker size={27} color={C.primary} />
+                </View>
+                <Text style={styles.emptyTitle}>No materials found</Text>
                 <Text style={styles.emptyText}>
                   {materials.length === 0
                     ? 'No materials have been registered in the inventory yet.'
@@ -352,62 +300,54 @@ export default function MaterialsScreen() {
                   material.laboratory_id
                 )
 
-                const status = getMaterialStatus(material)
-                const isLowStock = status === 'LOW STOCK'
+                const isLowStock =
+                  material.quantity <= material.minimum_quantity
 
                 return (
-                  <View
-                    key={material.id}
-                    style={styles.card}
-                  >
-                    <View style={styles.cardTop}>
-                      <View style={styles.idRow}>
-                        <Beaker
-                          size={16}
-                          color={COLORS.green}
-                          strokeWidth={1.6}
-                        />
+                  <View key={material.id} style={styles.materialCard}>
+                    <View style={styles.materialCardTop}>
+                      <View style={styles.materialIcon}>
+                        <Beaker size={19} color={C.primary} />
+                      </View>
 
+                      <View style={styles.materialHeading}>
+                        <Text style={styles.materialName}>
+                          {material.name}
+                        </Text>
                         <Text style={styles.materialId}>
-                          ID {material.id}
+                          MATERIAL ID · {material.id}
                         </Text>
                       </View>
 
-                      <ChevronRight
-                        size={17}
-                        color={COLORS.muted}
-                        strokeWidth={1.6}
-                      />
+                      <ChevronRight size={18} color={C.subtle} />
                     </View>
 
-                    <Text style={styles.materialName}>
-                      {material.name}
-                    </Text>
+                    <View style={styles.metadataRow}>
+                      <View style={styles.categoryTag}>
+                        <Text style={styles.categoryText}>
+                          {material.category.toUpperCase()}
+                        </Text>
+                      </View>
 
-                    <View style={styles.metaRow}>
-                      <Text style={styles.category}>
-                        {material.category.toUpperCase()}
-                      </Text>
-
-                      <Text style={styles.lab}>
+                      <Text style={styles.labText}>
                         {laboratory?.department ||
                           laboratory?.name ||
-                          `LAB ${material.laboratory_id}`}
+                          `Lab ${material.laboratory_id}`}
                       </Text>
                     </View>
 
-                    <View style={styles.cardFooter}>
+                    <View style={styles.stockPanel}>
                       <View>
-                        <Text style={styles.stockLabel}>
-                          CURRENT STOCK
-                        </Text>
-
-                        <Text style={styles.stock}>
-                          {formatQuantity(material.quantity)}{' '}
-                          {material.unit}
-                        </Text>
-
-                        <Text style={styles.minimumStock}>
+                        <Text style={styles.stockLabel}>CURRENT STOCK</Text>
+                        <View style={styles.quantityRow}>
+                          <Text style={styles.stockValue}>
+                            {formatQuantity(material.quantity)}
+                          </Text>
+                          <Text style={styles.stockUnit}>
+                            {material.unit}
+                          </Text>
+                        </View>
+                        <Text style={styles.minimumText}>
                           Minimum: {formatQuantity(material.minimum_quantity)}{' '}
                           {material.unit}
                         </Text>
@@ -415,29 +355,26 @@ export default function MaterialsScreen() {
 
                       <View
                         style={[
-                          styles.status,
+                          styles.statusPill,
                           isLowStock
                             ? styles.lowStatus
-                            : styles.stockStatus,
+                            : styles.availableStatus,
                         ]}
                       >
-                        {isLowStock && (
-                          <AlertTriangle
-                            size={11}
-                            color={COLORS.brick}
-                            strokeWidth={2}
-                          />
+                        {isLowStock ? (
+                          <AlertTriangle size={12} color={C.danger} />
+                        ) : (
+                          <View style={styles.availableDot} />
                         )}
-
                         <Text
                           style={[
                             styles.statusText,
                             isLowStock
-                              ? styles.lowText
-                              : styles.stockText,
+                              ? styles.lowStatusText
+                              : styles.availableStatusText,
                           ]}
                         >
-                          {status}
+                          {isLowStock ? 'LOW STOCK' : 'IN STOCK'}
                         </Text>
                       </View>
                     </View>
@@ -448,31 +385,27 @@ export default function MaterialsScreen() {
           </View>
         )}
 
-        {/* INVENTORY ATTENTION */}
-
         {!loading && !error && lowStockCount > 0 && (
-          <View style={styles.note}>
-            <View style={styles.noteIcon}>
-              <AlertTriangle
-                size={17}
-                color={COLORS.ochre}
-                strokeWidth={1.7}
-              />
+          <View style={styles.attentionCard}>
+            <View style={styles.attentionIcon}>
+              <AlertTriangle size={18} color={C.accent} />
             </View>
-
-            <View style={styles.noteContent}>
-              <Text style={styles.noteTitle}>
-                INVENTORY ATTENTION
+            <View style={styles.attentionContent}>
+              <Text style={styles.attentionTitle}>
+                Inventory attention
               </Text>
-
-              <Text style={styles.noteText}>
+              <Text style={styles.attentionText}>
                 {lowStockCount} material
-                {lowStockCount === 1 ? ' is' : 's are'} below
-                or at the configured minimum stock level.
+                {lowStockCount === 1 ? ' is' : 's are'} below or at the
+                configured minimum stock level.
               </Text>
             </View>
           </View>
         )}
+
+        <Text style={styles.footer}>
+          LABSYNC · MATERIALS REGISTER
+        </Text>
       </ScrollView>
     </SafeAreaView>
   )
@@ -481,372 +414,414 @@ export default function MaterialsScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: C.background,
   },
-
   content: {
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingTop: 14,
     paddingBottom: 40,
   },
-
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 23,
   },
-
   backButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: R.md,
+    backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.paper,
+    borderColor: C.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   headerText: {
     flex: 1,
     marginLeft: 12,
   },
-
   eyebrow: {
-    color: COLORS.ochre,
-    fontSize: 8,
+    color: C.primary,
+    fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 1.4,
+    letterSpacing: 1.3,
   },
-
   title: {
-    color: COLORS.ink,
+    color: C.ink,
     fontSize: 27,
-    fontWeight: '700',
+    fontWeight: '800',
+    letterSpacing: -0.7,
     marginTop: 2,
   },
-
+  subtitle: {
+    color: C.muted,
+    fontSize: 11,
+    marginTop: 3,
+  },
   addButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: COLORS.green,
+    width: 42,
+    height: 42,
+    borderRadius: R.md,
+    backgroundColor: C.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    ...S.floating,
   },
-
-  rule: {
-    height: 1,
-    backgroundColor: COLORS.ink,
-    opacity: 0.15,
-    marginVertical: 16,
-  },
-
   searchRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 9,
   },
-
   searchBox: {
     flex: 1,
-    height: 44,
-    backgroundColor: COLORS.paper,
+    height: 47,
+    backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
+    borderColor: C.border,
+    borderRadius: R.md,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 13,
+    paddingHorizontal: 14,
   },
-
   searchInput: {
     flex: 1,
     marginLeft: 9,
-    color: COLORS.ink,
+    color: C.ink,
     fontSize: 12,
   },
-
   filterButton: {
-    width: 44,
-    height: 44,
-    backgroundColor: COLORS.paper,
+    width: 47,
+    height: 47,
+    backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
+    borderColor: C.border,
+    borderRadius: R.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   filterButtonActive: {
-    backgroundColor: COLORS.green,
-    borderColor: COLORS.green,
+    backgroundColor: C.primary,
+    borderColor: C.primary,
   },
-
   filterHint: {
-    color: COLORS.green,
-    fontSize: 10,
-    marginTop: 7,
-  },
-
-  summary: {
-    marginTop: 16,
-    backgroundColor: COLORS.softGreen,
-    paddingVertical: 16,
-    paddingHorizontal: 14,
-    borderRadius: 4,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-  summaryNumber: {
-    color: COLORS.ink,
-    fontSize: 23,
-    fontWeight: '700',
-  },
-
-  summaryLabel: {
-    color: COLORS.green,
-    fontSize: 7,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-    marginTop: 3,
-  },
-
-  summaryDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: '#B9CCC4',
-  },
-
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 27,
-    marginBottom: 12,
-  },
-
-  sectionNumber: {
-    color: COLORS.ochre,
-    fontSize: 10,
-    fontWeight: '800',
-    marginRight: 8,
-  },
-
-  sectionTitle: {
-    color: COLORS.ink,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-  },
-
-  list: {
-    gap: 9,
-  },
-
-  card: {
-    backgroundColor: COLORS.paper,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
-    padding: 14,
-  },
-
-  cardTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-  idRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-
-  materialId: {
-    color: COLORS.blue,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-  },
-
-  materialName: {
-    color: COLORS.ink,
-    fontSize: 16,
-    fontWeight: '700',
     marginTop: 9,
+    alignSelf: 'flex-start',
   },
-
-  metaRow: {
+  filterHintText: {
+    color: C.primary,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  summaryCard: {
+    marginTop: 18,
+    padding: 16,
+    borderRadius: R.lg,
+    backgroundColor: C.primaryLight,
+  },
+  summaryHeading: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 7,
+    gap: 9,
+    marginBottom: 16,
   },
-
-  category: {
-    color: COLORS.green,
+  summaryIcon: {
+    width: 31,
+    height: 31,
+    borderRadius: 10,
+    backgroundColor: C.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryTitle: {
+    color: C.primaryDark,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  summaryStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  summaryItem: {
+    flex: 1,
+  },
+  summaryValue: {
+    color: C.ink,
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  warningValue: {
+    color: C.danger,
+  },
+  summaryLabel: {
+    color: C.primary,
     fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 0.6,
+    letterSpacing: 0.8,
+    marginTop: 3,
   },
-
-  lab: {
-    color: COLORS.muted,
-    fontSize: 9,
-    marginLeft: 10,
+  summaryDivider: {
+    height: 34,
+    width: 1,
+    backgroundColor: '#B9CCC4',
+    marginHorizontal: 9,
   },
-
-  cardFooter: {
-    marginTop: 14,
-    paddingTop: 11,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+  sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 29,
+    marginBottom: 14,
+  },
+  sectionTitle: {
+    color: C.ink,
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+  },
+  sectionSubtitle: {
+    color: C.muted,
+    fontSize: 10,
+    marginTop: 4,
+  },
+  sectionIcon: {
+    width: 35,
+    height: 35,
+    borderRadius: 11,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  list: {
+    gap: 11,
+  },
+  materialCard: {
+    padding: 15,
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
+    borderWidth: 1,
+    borderColor: C.border,
+    ...S.card,
+  },
+  materialCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  materialIcon: {
+    width: 39,
+    height: 39,
+    borderRadius: 12,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  materialHeading: {
+    flex: 1,
+    marginLeft: 11,
+  },
+  materialName: {
+    color: C.ink,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  materialId: {
+    color: C.subtle,
+    fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 0.7,
+    marginTop: 4,
+  },
+  metadataRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    marginTop: 13,
+  },
+  categoryTag: {
+    backgroundColor: C.secondaryLight,
+    borderRadius: R.pill,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  categoryText: {
+    color: C.secondary,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  labText: {
+    color: C.muted,
+    fontSize: 10,
+    fontWeight: '600',
+    flex: 1,
+  },
+  stockPanel: {
+    marginTop: 15,
+    paddingTop: 13,
+    borderTopWidth: 1,
+    borderTopColor: C.divider,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
   },
-
   stockLabel: {
-    color: COLORS.muted,
-    fontSize: 7,
+    color: C.muted,
+    fontSize: 8,
     fontWeight: '800',
     letterSpacing: 0.8,
   },
-
-  stock: {
-    color: COLORS.ink,
-    fontSize: 13,
-    fontWeight: '700',
+  quantityRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 5,
     marginTop: 3,
   },
-
-  minimumStock: {
-    color: COLORS.muted,
-    fontSize: 9,
-    marginTop: 4,
+  stockValue: {
+    color: C.ink,
+    fontSize: 21,
+    fontWeight: '800',
   },
-
-  status: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 3,
+  stockUnit: {
+    color: C.muted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  minimumText: {
+    color: C.muted,
+    fontSize: 9,
+    marginTop: 3,
+  },
+  statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: R.pill,
   },
-
-  stockStatus: {
-    backgroundColor: COLORS.softGreen,
-  },
-
   lowStatus: {
-    backgroundColor: '#F2DFD9',
+    backgroundColor: C.dangerLight,
   },
-
+  availableStatus: {
+    backgroundColor: C.successLight,
+  },
+  availableDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 4,
+    backgroundColor: C.success,
+  },
   statusText: {
-    fontSize: 7,
+    fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 0.6,
+    letterSpacing: 0.4,
   },
-
-  stockText: {
-    color: COLORS.green,
+  lowStatusText: {
+    color: C.danger,
   },
-
-  lowText: {
-    color: COLORS.brick,
+  availableStatusText: {
+    color: C.success,
   },
-
   stateContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 35,
     gap: 12,
   },
-
   stateText: {
-    color: COLORS.muted,
+    color: C.muted,
     fontSize: 12,
   },
-
-  errorText: {
-    color: COLORS.brick,
-    fontSize: 12,
-    textAlign: 'center',
-  },
-
-  retryButton: {
-    backgroundColor: COLORS.softGreen,
-    paddingHorizontal: 18,
-    paddingVertical: 9,
-    borderRadius: 5,
-  },
-
-  retryText: {
-    color: COLORS.green,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  emptyContainer: {
+  stateCard: {
     alignItems: 'center',
-    paddingVertical: 35,
-    paddingHorizontal: 20,
-    backgroundColor: COLORS.paper,
+    justifyContent: 'center',
+    padding: 25,
+    backgroundColor: C.surface,
+    borderRadius: R.lg,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 4,
+    borderColor: C.border,
   },
-
-  emptyTitle: {
-    color: COLORS.ink,
+  errorTitle: {
+    color: C.ink,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
+    marginTop: 8,
+  },
+  errorText: {
+    color: C.danger,
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  retryButton: {
+    backgroundColor: C.primaryLight,
+    paddingHorizontal: 19,
+    paddingVertical: 10,
+    borderRadius: R.md,
+    marginTop: 14,
+  },
+  retryText: {
+    color: C.primary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  emptyIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: C.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyTitle: {
+    color: C.ink,
+    fontSize: 14,
+    fontWeight: '800',
     marginTop: 12,
   },
-
   emptyText: {
-    color: COLORS.muted,
+    color: C.muted,
     fontSize: 11,
     textAlign: 'center',
     lineHeight: 17,
     marginTop: 6,
   },
-
-  note: {
-    marginTop: 24,
+  attentionCard: {
+    marginTop: 22,
     padding: 14,
-    backgroundColor: '#F2E8D9',
-    borderRadius: 4,
+    borderRadius: R.lg,
+    backgroundColor: C.warningLight,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 11,
   },
-
-  noteIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#F7EFE4',
+  attentionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: C.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  noteContent: {
+  attentionContent: {
     flex: 1,
-    marginLeft: 10,
   },
-
-  noteTitle: {
-    color: COLORS.ochre,
+  attentionTitle: {
+    color: C.accent,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  attentionText: {
+    color: C.text,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 3,
+  },
+  footer: {
+    color: C.subtle,
     fontSize: 8,
     fontWeight: '800',
-    letterSpacing: 1,
-  },
-
-  noteText: {
-    color: COLORS.muted,
-    fontSize: 9,
-    lineHeight: 14,
-    marginTop: 3,
+    letterSpacing: 1.2,
+    textAlign: 'center',
+    marginTop: 28,
   },
 })
