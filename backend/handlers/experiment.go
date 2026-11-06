@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"context"
-	"log"
+	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
@@ -22,44 +23,78 @@ func validExperimentStatus(status string) bool {
 	}
 }
 
+// resolveExperimentResearcher gets the official name of an active researcher.
+func resolveExperimentResearcher(
+	ctx context.Context,
+	query interface {
+		QueryRow(context.Context, string, ...any) pgx.Row
+	},
+	researcherID *int,
+	legacyName string,
+) (string, error) {
+	if researcherID == nil {
+		return strings.TrimSpace(legacyName), nil
+	}
+
+	if *researcherID <= 0 {
+		return "", errors.New("invalid researcher ID")
+	}
+
+	var fullName string
+	err := query.QueryRow(ctx, `
+		SELECT full_name
+		FROM researchers
+		WHERE id = $1 AND status = 'ACTIVE'
+	`, *researcherID).Scan(&fullName)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", errors.New("active researcher not found")
+	}
+	if err != nil {
+		return "", err
+	}
+
+	return fullName, nil
+}
+
 // GET /api/experiments
 func GetExperiments(c fiber.Ctx) error {
-	rows, err := database.DB.Query(context.Background(), `
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := database.DB.Query(ctx, `
 		SELECT id, laboratory_id, name,
 		       COALESCE(description, ''),
+		       researcher_id,
 		       COALESCE(started_by, ''),
 		       status, start_time, end_time, created_at
 		FROM experiments
 		ORDER BY id DESC
 	`)
 	if err != nil {
-		log.Printf("GetExperiments database query error: %v", err)
-
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to fetch experiments",
 		})
 	}
 	defer rows.Close()
 
-	experiments := []models.Experiment{}
+	experiments := make([]models.Experiment, 0)
 
 	for rows.Next() {
 		var experiment models.Experiment
 
-		err := rows.Scan(
+		if err := rows.Scan(
 			&experiment.ID,
 			&experiment.LaboratoryID,
 			&experiment.Name,
 			&experiment.Description,
+			&experiment.ResearcherID,
 			&experiment.StartedBy,
 			&experiment.Status,
 			&experiment.StartTime,
 			&experiment.EndTime,
 			&experiment.CreatedAt,
-		)
-		if err != nil {
-			log.Printf("GetExperiments row scan error: %v", err)
-
+		); err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"error": "Failed to read experiment data",
 			})
@@ -69,8 +104,6 @@ func GetExperiments(c fiber.Ctx) error {
 	}
 
 	if err := rows.Err(); err != nil {
-		log.Printf("GetExperiments rows iteration error: %v", err)
-
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Error while reading experiments",
 		})
@@ -91,11 +124,15 @@ func GetExperiment(c fiber.Ctx) error {
 		})
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	var experiment models.Experiment
 
-	err = database.DB.QueryRow(context.Background(), `
+	err = database.DB.QueryRow(ctx, `
 		SELECT id, laboratory_id, name,
 		       COALESCE(description, ''),
+		       researcher_id,
 		       COALESCE(started_by, ''),
 		       status, start_time, end_time, created_at
 		FROM experiments
@@ -105,6 +142,7 @@ func GetExperiment(c fiber.Ctx) error {
 		&experiment.LaboratoryID,
 		&experiment.Name,
 		&experiment.Description,
+		&experiment.ResearcherID,
 		&experiment.StartedBy,
 		&experiment.Status,
 		&experiment.StartTime,
@@ -112,13 +150,12 @@ func GetExperiment(c fiber.Ctx) error {
 		&experiment.CreatedAt,
 	)
 
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Experiment not found",
+		})
+	}
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return c.Status(404).JSON(fiber.Map{
-				"error": "Experiment not found",
-			})
-		}
-
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to fetch experiment",
 		})
@@ -135,6 +172,7 @@ func CreateExperiment(c fiber.Ctx) error {
 		LaboratoryID int    `json:"laboratory_id"`
 		Name         string `json:"name"`
 		Description  string `json:"description"`
+		ResearcherID *int   `json:"researcher_id"`
 		StartedBy    string `json:"started_by"`
 		Status       string `json:"status"`
 	}
@@ -146,6 +184,7 @@ func CreateExperiment(c fiber.Ctx) error {
 	}
 
 	input.Name = strings.TrimSpace(input.Name)
+	input.Status = strings.ToUpper(strings.TrimSpace(input.Status))
 
 	if input.LaboratoryID <= 0 || input.Name == "" {
 		return c.Status(400).JSON(fiber.Map{
@@ -163,27 +202,51 @@ func CreateExperiment(c fiber.Ctx) error {
 		})
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	startedBy, err := resolveExperimentResearcher(
+		ctx,
+		database.DB,
+		input.ResearcherID,
+		input.StartedBy,
+	)
+	if err != nil {
+		if err.Error() == "invalid researcher ID" ||
+			err.Error() == "active researcher not found" {
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to verify researcher",
+		})
+	}
+
 	var experiment models.Experiment
 
-	err := database.DB.QueryRow(context.Background(), `
-		INSERT INTO experiments
-			(laboratory_id, name, description, started_by, status)
-		VALUES ($1, $2, $3, $4, $5)
+	err = database.DB.QueryRow(ctx, `
+		INSERT INTO experiments (
+			laboratory_id, name, description,
+			researcher_id, started_by, status
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, laboratory_id, name,
 		          COALESCE(description, ''),
+		          researcher_id,
 		          COALESCE(started_by, ''),
 		          status, start_time, end_time, created_at
 	`,
 		input.LaboratoryID,
 		input.Name,
 		input.Description,
-		input.StartedBy,
+		input.ResearcherID,
+		startedBy,
 		input.Status,
 	).Scan(
 		&experiment.ID,
 		&experiment.LaboratoryID,
 		&experiment.Name,
 		&experiment.Description,
+		&experiment.ResearcherID,
 		&experiment.StartedBy,
 		&experiment.Status,
 		&experiment.StartTime,
@@ -216,6 +279,7 @@ func UpdateExperiment(c fiber.Ctx) error {
 		LaboratoryID int    `json:"laboratory_id"`
 		Name         string `json:"name"`
 		Description  string `json:"description"`
+		ResearcherID *int   `json:"researcher_id"`
 		StartedBy    string `json:"started_by"`
 		Status       string `json:"status"`
 	}
@@ -227,6 +291,7 @@ func UpdateExperiment(c fiber.Ctx) error {
 	}
 
 	input.Name = strings.TrimSpace(input.Name)
+	input.Status = strings.ToUpper(strings.TrimSpace(input.Status))
 
 	if input.LaboratoryID <= 0 || input.Name == "" {
 		return c.Status(400).JSON(fiber.Map{
@@ -240,24 +305,53 @@ func UpdateExperiment(c fiber.Ctx) error {
 		})
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	startedBy, err := resolveExperimentResearcher(
+		ctx,
+		database.DB,
+		input.ResearcherID,
+		input.StartedBy,
+	)
+	if err != nil {
+		if err.Error() == "invalid researcher ID" ||
+			err.Error() == "active researcher not found" {
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to verify researcher",
+		})
+	}
+
 	var experiment models.Experiment
 
-	err = database.DB.QueryRow(context.Background(), `
+	err = database.DB.QueryRow(ctx, `
 		UPDATE experiments
 		SET laboratory_id = $1,
 		    name = $2,
 		    description = $3,
-		    started_by = $4,
-		    status = COALESCE(NULLIF($5, ''), status)
-		WHERE id = $6
+		    researcher_id = CASE
+		        WHEN $4::integer IS NOT NULL THEN $4
+		        ELSE researcher_id
+		    END,
+		    started_by = CASE
+		        WHEN $4::integer IS NOT NULL THEN $5
+		        ELSE $6
+		    END,
+		    status = COALESCE(NULLIF($7, ''), status)
+		WHERE id = $8
 		RETURNING id, laboratory_id, name,
 		          COALESCE(description, ''),
+		          researcher_id,
 		          COALESCE(started_by, ''),
 		          status, start_time, end_time, created_at
 	`,
 		input.LaboratoryID,
 		input.Name,
 		input.Description,
+		input.ResearcherID,
+		startedBy,
 		input.StartedBy,
 		input.Status,
 		id,
@@ -266,6 +360,7 @@ func UpdateExperiment(c fiber.Ctx) error {
 		&experiment.LaboratoryID,
 		&experiment.Name,
 		&experiment.Description,
+		&experiment.ResearcherID,
 		&experiment.StartedBy,
 		&experiment.Status,
 		&experiment.StartTime,
@@ -273,13 +368,12 @@ func UpdateExperiment(c fiber.Ctx) error {
 		&experiment.CreatedAt,
 	)
 
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Experiment not found",
+		})
+	}
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return c.Status(404).JSON(fiber.Map{
-				"error": "Experiment not found",
-			})
-		}
-
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Could not update experiment. Check the laboratory ID.",
 		})

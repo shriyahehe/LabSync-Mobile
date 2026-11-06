@@ -5,6 +5,7 @@ import "time"
 type InventoryTransaction struct {
 	ID              int       `json:"id"`
 	MaterialID      int       `json:"material_id"`
+	ResearcherID    *int      `json:"researcher_id,omitempty"`
 	TransactionType string    `json:"transaction_type"`
 	Quantity        float64   `json:"quantity"`
 	PerformedBy     string    `json:"performed_by"`
