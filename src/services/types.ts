@@ -231,3 +231,65 @@ export interface CreateSampleTransactionResponse {
   transaction: SampleTransaction;
   available_quantity: number;
 }
+
+
+// ---------- Researchers ----------
+
+export type ResearcherType = 'RESEARCH_SCHOLAR' | 'PHD_SCHOLAR';
+export type ResearcherStatus = 'ACTIVE' | 'INACTIVE';
+
+export interface Researcher {
+  id: number;
+  researcher_code: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  researcher_type: ResearcherType;
+  department: string | null;
+  research_area: string | null;
+  primary_laboratory_id: number;
+  primary_laboratory: string;
+  supervisor_name: string | null;
+  joining_date: string | null;
+  status: ResearcherStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateResearcherInput {
+  researcher_code: string;
+  full_name: string;
+  email?: string | null;
+  phone?: string | null;
+  researcher_type: ResearcherType;
+  department?: string | null;
+  research_area?: string | null;
+  primary_laboratory_id: number;
+  supervisor_name?: string | null;
+  joining_date?: string | null;
+  status: ResearcherStatus;
+}
+
+export type UpdateResearcherInput = CreateResearcherInput;
+
+export type ResearcherActivityType =
+  | 'LAB_ENTRY'
+  | 'EQUIPMENT'
+  | 'SAMPLE'
+  | 'MATERIAL'
+  | 'EXPERIMENT';
+
+export interface ResearcherActivity {
+  activity_type: ResearcherActivityType;
+  reference_id: number;
+  title: string;
+  details: string;
+  occurred_at: string;
+}
+
+export interface ResearcherActivityResponse {
+  researcher_id: number;
+  activities: ResearcherActivity[];
+  total: number;
+}
+

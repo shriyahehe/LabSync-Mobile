@@ -215,10 +215,15 @@ export default function MoreScreen() {
 
             return (
               <TouchableOpacity
-                key={item.title}
-                style={styles.managementCard}
-                activeOpacity={0.75}
-              >
+  key={item.title}
+  style={styles.managementCard}
+  activeOpacity={0.75}
+  onPress={() => {
+    if (item.title === 'Team') {
+      router.push('/researchers')
+    }
+  }}
+>
                 <View
                   style={[
                     styles.managementIcon,
