@@ -45,3 +45,8 @@ example
 .env
 .env.*
 !.env.example
+
+# LabSync backend environment files
+backend/.env
+backend/.env.*
+!backend/.env.example
