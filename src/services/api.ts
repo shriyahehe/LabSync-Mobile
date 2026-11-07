@@ -19,6 +19,7 @@ import type {
   LabEntry,
   Laboratory,
   Material,
+  Researcher,
   Sample,
   SampleTransaction,
   UpdateExperimentInput,
@@ -136,6 +137,13 @@ export const createLaboratory = (
   input: CreateLaboratoryInput
 ): Promise<Laboratory> =>
   post<Laboratory>('/api/laboratories', input);
+
+// ==========================================
+// RESEARCHERS
+// ==========================================
+
+export const getResearchers = (): Promise<Researcher[]> =>
+  getList<Researcher>('/api/researchers');
 
 // ==========================================
 // MATERIALS
@@ -272,8 +280,6 @@ export async function createExperimentRecord(
 // LAB ENTRY RECORDS
 // ==========================================
 
-// Get all lab entry records.
-// Optionally filter by laboratory ID.
 export const getLabEntries = (
   laboratoryId?: number
 ): Promise<LabEntry[]> => {
@@ -285,17 +291,14 @@ export const getLabEntries = (
   return getList<LabEntry>(`/api/lab-entries${query}`);
 };
 
-// Get researchers currently inside laboratories.
 export const getActiveLabEntries = (): Promise<LabEntry[]> =>
   getList<LabEntry>('/api/lab-entries/active');
 
-// Check a researcher into a laboratory.
 export const checkInResearcher = (
   input: CreateLabEntryInput
 ): Promise<LabEntry> =>
   post<LabEntry>('/api/lab-entries/check-in', input);
 
-// Check a researcher out of a laboratory.
 export const checkOutResearcher = (
   entryId: number
 ): Promise<LabEntry> =>
@@ -303,6 +306,11 @@ export const checkOutResearcher = (
     `/api/lab-entries/${encodeURIComponent(String(entryId))}/check-out`,
     {}
   );
+
+// ==========================================
+// SAMPLES
+// ==========================================
+
 export const getSamples = (): Promise<Sample[]> =>
   getList<Sample>('/api/samples');
 

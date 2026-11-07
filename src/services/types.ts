@@ -100,6 +100,7 @@ export type EquipmentTransactionType = 'CHECKOUT' | 'RETURN';
 export interface EquipmentTransaction {
   id: number;
   equipment_id: number;
+  researcher_id?: number | null;
   transaction_type: EquipmentTransactionType;
   performed_by: string;
   notes: string;
@@ -107,9 +108,9 @@ export interface EquipmentTransaction {
   return_time?: string | null;
   created_at: string;
 }
-
 export interface CreateEquipmentTransactionInput {
   equipment_id: number;
+  researcher_id?: number;
   transaction_type: EquipmentTransactionType;
   performed_by: string;
   notes: string;
@@ -230,4 +231,20 @@ export interface CreateSampleTransactionInput {
 export interface CreateSampleTransactionResponse {
   transaction: SampleTransaction;
   available_quantity: number;
+}
+export interface Researcher {
+  id: number;
+  researcher_code: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  researcher_type: 'RESEARCH_SCHOLAR' | 'PHD_SCHOLAR';
+  department: string;
+  research_area: string;
+  primary_laboratory_id: number | null;
+  supervisor_name: string;
+  joining_date: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  created_at: string;
+  updated_at: string;
 }
