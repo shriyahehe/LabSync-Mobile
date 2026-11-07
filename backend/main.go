@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"os"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/joho/godotenv"
@@ -22,6 +21,8 @@ func main() {
 	if err := database.Connect(); err != nil {
 		log.Fatalf("Database connection failed: %v", err)
 	}
+
+	// Close all database connections when the application exits.
 	defer database.Close()
 
 	app := fiber.New()
@@ -37,25 +38,22 @@ func main() {
 	routes.SampleRoutes(app)
 	routes.ResearcherRoutes(app)
 
+	// Home route.
 	app.Get("/", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"message": "LabSync Backend is running",
 		})
 	})
 
+	// Health check.
 	app.Get("/health", func(c fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status": "ok",
 		})
 	})
 
-	// Start server using configured port.
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	if err := app.Listen(":" + port); err != nil {
+	// Start the server.
+	if err := app.Listen(":8080"); err != nil {
 		log.Printf("Server stopped: %v", err)
 	}
 }

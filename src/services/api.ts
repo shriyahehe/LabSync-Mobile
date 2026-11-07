@@ -8,6 +8,7 @@ import type {
   CreateLabEntryInput,
   CreateLaboratoryInput,
   CreateMaterialInput,
+  CreateResearcherInput,
   CreateSampleInput,
   CreateSampleTransactionInput,
   CreateSampleTransactionResponse,
@@ -20,9 +21,11 @@ import type {
   Laboratory,
   Material,
   Researcher,
+  ResearcherActivityResponse,
   Sample,
   SampleTransaction,
   UpdateExperimentInput,
+  UpdateResearcherInput,
 } from './types';
 
 // ==========================================
@@ -137,13 +140,6 @@ export const createLaboratory = (
   input: CreateLaboratoryInput
 ): Promise<Laboratory> =>
   post<Laboratory>('/api/laboratories', input);
-
-// ==========================================
-// RESEARCHERS
-// ==========================================
-
-export const getResearchers = (): Promise<Researcher[]> =>
-  getList<Researcher>('/api/researchers');
 
 // ==========================================
 // MATERIALS
@@ -331,3 +327,71 @@ export const createSampleTransaction = (
   input: CreateSampleTransactionInput
 ): Promise<CreateSampleTransactionResponse> =>
   post<CreateSampleTransactionResponse>('/api/sample-transactions', input);
+
+// ==========================================
+// RESEARCHERS
+// ==========================================
+
+export const getResearchers = (
+  filters: {
+    search?: string;
+    type?: Researcher['researcher_type'];
+    status?: Researcher['status'];
+    laboratory_id?: number;
+  } = {}
+): Promise<Researcher[]> => {
+  const params = new URLSearchParams();
+
+  if (filters.search?.trim()) {
+    params.set('search', filters.search.trim());
+  }
+
+  if (filters.type) {
+    params.set('type', filters.type);
+  }
+
+  if (filters.status) {
+    params.set('status', filters.status);
+  }
+
+  if (filters.laboratory_id !== undefined) {
+    params.set('laboratory_id', String(filters.laboratory_id));
+  }
+
+  const query = params.toString();
+
+  return getList<Researcher>(
+    `/api/researchers${query ? `?${query}` : ''}`
+  );
+};
+
+export const getResearcher = (id: number): Promise<Researcher> =>
+  request<Researcher>(
+    `/api/researchers/${encodeURIComponent(String(id))}`,
+    { method: 'GET' }
+  );
+
+export const createResearcher = (
+  input: CreateResearcherInput
+): Promise<Researcher> =>
+  post<Researcher>('/api/researchers', input);
+
+export const updateResearcher = (
+  id: number,
+  input: UpdateResearcherInput
+): Promise<Researcher> =>
+  request<Researcher>(
+    `/api/researchers/${encodeURIComponent(String(id))}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }
+  );
+
+export const getResearcherActivity = (
+  id: number
+): Promise<ResearcherActivityResponse> =>
+  request<ResearcherActivityResponse>(
+    `/api/researchers/${encodeURIComponent(String(id))}/activity`,
+    { method: 'GET' }
+  );
