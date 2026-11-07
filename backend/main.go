@@ -4,12 +4,18 @@ import (
 	"log"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/joho/godotenv"
 
 	"labsync/backend/database"
 	"labsync/backend/routes"
 )
 
 func main() {
+	// Load environment variables from the .env file.
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: .env file not found; using system environment variables")
+	}
+
 	// Connect to PostgreSQL using a connection pool.
 	if err := database.Connect(); err != nil {
 		log.Fatalf("Database connection failed: %v", err)

@@ -100,6 +100,7 @@ export type EquipmentTransactionType = 'CHECKOUT' | 'RETURN';
 export interface EquipmentTransaction {
   id: number;
   equipment_id: number;
+  researcher_id?: number | null;
   transaction_type: EquipmentTransactionType;
   performed_by: string;
   notes: string;
@@ -110,6 +111,7 @@ export interface EquipmentTransaction {
 
 export interface CreateEquipmentTransactionInput {
   equipment_id: number;
+  researcher_id?: number;
   transaction_type: EquipmentTransactionType;
   performed_by: string;
   notes: string;
@@ -163,6 +165,7 @@ export interface CreateExperimentRecordInput {
   record_type: string;
   notes: string;
 }
+
 // ---------- Lab Entry Records ----------
 
 export interface LabEntry {
@@ -181,6 +184,8 @@ export interface CreateLabEntryInput {
   researcher_name: string;
   notes: string;
 }
+
+// ---------- Samples ----------
 
 export interface Sample {
   id: number;
@@ -232,11 +237,15 @@ export interface CreateSampleTransactionResponse {
   available_quantity: number;
 }
 
-
 // ---------- Researchers ----------
 
-export type ResearcherType = 'RESEARCH_SCHOLAR' | 'PHD_SCHOLAR';
-export type ResearcherStatus = 'ACTIVE' | 'INACTIVE';
+export type ResearcherType =
+  | 'RESEARCH_SCHOLAR'
+  | 'PHD_SCHOLAR';
+
+export type ResearcherStatus =
+  | 'ACTIVE'
+  | 'INACTIVE';
 
 export interface Researcher {
   id: number;
@@ -272,6 +281,8 @@ export interface CreateResearcherInput {
 
 export type UpdateResearcherInput = CreateResearcherInput;
 
+// ---------- Researcher Activity ----------
+
 export type ResearcherActivityType =
   | 'LAB_ENTRY'
   | 'EQUIPMENT'
@@ -292,4 +303,3 @@ export interface ResearcherActivityResponse {
   activities: ResearcherActivity[];
   total: number;
 }
-
