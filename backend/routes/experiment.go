@@ -2,16 +2,35 @@ package routes
 
 import (
 	"github.com/gofiber/fiber/v3"
-
 	"labsync/backend/handlers"
+	"labsync/backend/middleware"
 )
 
 func ExperimentRoutes(app *fiber.App) {
-	app.Get("/api/experiments", handlers.GetExperiments)
-	app.Get("/api/experiments/:id", handlers.GetExperiment)
-	app.Post("/api/experiments", handlers.CreateExperiment)
-	app.Put("/api/experiments/:id", handlers.UpdateExperiment)
+	api := app.Group("/api", middleware.RequireAuth)
 
-	app.Post("/api/experiments/:id/records", handlers.CreateExperimentRecord)
-	app.Get("/api/experiments/:id/records", handlers.GetExperimentRecords)
+	api.Get("/experiments",
+		middleware.RequirePermission("experiments.read"),
+		handlers.GetExperiments,
+	)
+	api.Get("/experiments/:id",
+		middleware.RequirePermission("experiments.read"),
+		handlers.GetExperiment,
+	)
+	api.Post("/experiments",
+		middleware.RequirePermission("experiments.manage"),
+		handlers.CreateExperiment,
+	)
+	api.Put("/experiments/:id",
+		middleware.RequirePermission("experiments.manage"),
+		handlers.UpdateExperiment,
+	)
+	api.Post("/experiments/:id/records",
+		middleware.RequirePermission("experiments.manage"),
+		handlers.CreateExperimentRecord,
+	)
+	api.Get("/experiments/:id/records",
+		middleware.RequirePermission("experiments.read"),
+		handlers.GetExperimentRecords,
+	)
 }

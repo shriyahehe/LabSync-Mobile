@@ -40,8 +40,26 @@ func Connect() error {
 		return fmt.Errorf("failed to connect to PostgreSQL: %w", err)
 	}
 
+	var databaseName string
+	var databaseUser string
+
+	err = pool.QueryRow(ctx,
+		"SELECT current_database(), current_user",
+	).Scan(&databaseName, &databaseUser)
+
+	if err != nil {
+		pool.Close()
+		return fmt.Errorf("failed to identify connected database: %w", err)
+	}
+
 	DB = pool
-	fmt.Println("Connected to PostgreSQL using connection pool!")
+
+	fmt.Printf(
+		"Connected to PostgreSQL | Database: %s | User: %s\n",
+		databaseName,
+		databaseUser,
+	)
+
 	return nil
 }
 

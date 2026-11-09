@@ -14,27 +14,30 @@ import (
 )
 
 func GetEquipmentTransactions(c fiber.Ctx) error {
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to determine laboratory access"})
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	rows, err := database.DB.Query(ctx, `
-		SELECT id, equipment_id, transaction_type, researcher_id,
-		       performed_by, notes, checkout_time, return_time, created_at
-		FROM equipment_transactions
-		ORDER BY created_at DESC
-	`)
+		SELECT t.id, t.equipment_id, t.transaction_type, t.researcher_id,
+		       t.performed_by, t.notes, t.checkout_time, t.return_time, t.created_at
+		FROM equipment_transactions t
+		JOIN equipment e ON e.id = t.equipment_id
+		WHERE $1::boolean OR e.laboratory_id = ANY($2::integer[])
+		ORDER BY t.created_at DESC
+	`, scope.AllLaboratories, scope.LaboratoryIDs)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to fetch equipment transactions",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch equipment transactions"})
 	}
 	defer rows.Close()
 
 	transactions := make([]models.EquipmentTransaction, 0)
-
 	for rows.Next() {
 		var transaction models.EquipmentTransaction
-
 		if err := rows.Scan(
 			&transaction.ID,
 			&transaction.EquipmentID,
@@ -46,45 +49,37 @@ func GetEquipmentTransactions(c fiber.Ctx) error {
 			&transaction.ReturnTime,
 			&transaction.CreatedAt,
 		); err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"error": "Failed to read equipment transaction data",
-			})
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to read equipment transaction data"})
 		}
-
 		transactions = append(transactions, transaction)
 	}
 
 	if err := rows.Err(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed while reading equipment transactions",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed while reading equipment transactions"})
 	}
-
 	return c.JSON(transactions)
 }
 
 func CreateEquipmentTransaction(c fiber.Ctx) error {
-	var request models.EquipmentTransaction
+	actorID, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to determine authenticated user access"})
+	}
 
+	var request models.EquipmentTransaction
 	if err := c.Bind().Body(&request); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
 	if request.EquipmentID <= 0 {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Equipment ID is required",
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "Equipment ID is required"})
 	}
 
 	request.TransactionType = strings.ToUpper(strings.TrimSpace(request.TransactionType))
 	request.PerformedBy = strings.TrimSpace(request.PerformedBy)
 
 	if request.TransactionType != "CHECKOUT" && request.TransactionType != "RETURN" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Transaction type must be CHECKOUT or RETURN",
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "Transaction type must be CHECKOUT or RETURN"})
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -92,61 +87,61 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 
 	tx, err := database.DB.Begin(ctx)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to start database transaction",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to start database transaction"})
 	}
 	defer tx.Rollback(ctx)
 
-	// Resolve the official researcher name when researcher_id is supplied.
-	if request.ResearcherID != nil {
-		if *request.ResearcherID <= 0 {
-			return c.Status(400).JSON(fiber.Map{
-				"error": "Invalid researcher ID",
-			})
-		}
-
-		err = tx.QueryRow(ctx, `
-			SELECT full_name
-			FROM researchers
-			WHERE id = $1 AND status = 'ACTIVE'
-		`, *request.ResearcherID).Scan(&request.PerformedBy)
-
-		if errors.Is(err, pgx.ErrNoRows) {
-			return c.Status(404).JSON(fiber.Map{
-				"error": "Active researcher not found",
-			})
-		}
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"error": "Failed to verify researcher",
-			})
-		}
-	} else if request.PerformedBy == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Researcher ID or performed by name is required",
-		})
-	}
-
-	// Lock equipment to prevent simultaneous checkout/return operations.
+	var laboratoryID int
 	var currentStatus string
 
 	err = tx.QueryRow(ctx, `
-		SELECT status
+		SELECT laboratory_id, status
 		FROM equipment
 		WHERE id = $1
 		FOR UPDATE
-	`, request.EquipmentID).Scan(&currentStatus)
+	`, request.EquipmentID).Scan(&laboratoryID, &currentStatus)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return c.Status(404).JSON(fiber.Map{
-			"error": "Equipment not found",
-		})
+		return c.Status(404).JSON(fiber.Map{"error": "Equipment not found"})
 	}
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to check equipment status",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to retrieve equipment"})
+	}
+	if !scopeAllowsLaboratory(scope, laboratoryID) {
+		return laboratoryAccessDenied(c)
+	}
+
+	if request.ResearcherID != nil {
+		if *request.ResearcherID <= 0 {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid researcher ID"})
+		}
+
+		err = tx.QueryRow(ctx, `
+			SELECT r.full_name
+			FROM researchers r
+			WHERE r.id = $1
+			  AND r.status = 'ACTIVE'
+			  AND (
+			      r.primary_laboratory_id = $2
+			      OR EXISTS (
+			          SELECT 1
+			          FROM researcher_laboratories rl
+			          WHERE rl.researcher_id = r.id
+			            AND rl.laboratory_id = $2
+			      )
+			  )
+		`, *request.ResearcherID, laboratoryID).Scan(&request.PerformedBy)
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			return c.Status(403).JSON(fiber.Map{
+				"error": "Researcher is not active or is not assigned to this laboratory",
+			})
+		}
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to verify researcher"})
+		}
+	} else if request.PerformedBy == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Researcher ID or performed by name is required"})
 	}
 
 	currentStatus = strings.ToUpper(strings.TrimSpace(currentStatus))
@@ -154,17 +149,16 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 
 	if request.TransactionType == "CHECKOUT" {
 		if currentStatus != "AVAILABLE" {
-			return c.Status(400).JSON(fiber.Map{
-				"error": "Equipment is not available for checkout",
-			})
+			return c.Status(400).JSON(fiber.Map{"error": "Equipment is not available for checkout"})
 		}
 
 		var transaction models.EquipmentTransaction
-
 		err = tx.QueryRow(ctx, `
-			INSERT INTO equipment_transactions
-				(equipment_id, transaction_type, researcher_id, performed_by, notes, checkout_time)
-			VALUES ($1, 'CHECKOUT', $2, $3, $4, $5)
+			INSERT INTO equipment_transactions (
+				equipment_id, transaction_type, researcher_id,
+				performed_by, notes, checkout_time, actor_user_id
+			)
+			VALUES ($1, 'CHECKOUT', $2, $3, $4, $5, $6)
 			RETURNING id, created_at
 		`,
 			request.EquipmentID,
@@ -172,12 +166,18 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 			request.PerformedBy,
 			request.Notes,
 			now,
+			actorID,
 		).Scan(&transaction.ID, &transaction.CreatedAt)
 
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"error": "Failed to create equipment checkout",
-			})
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to create equipment checkout"})
+		}
+
+		_, err = tx.Exec(ctx, `
+			UPDATE equipment SET status = 'IN_USE' WHERE id = $1
+		`, request.EquipmentID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to update equipment status"})
 		}
 
 		transaction.EquipmentID = request.EquipmentID
@@ -187,36 +187,17 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 		transaction.Notes = request.Notes
 		transaction.CheckoutTime = &now
 
-		_, err = tx.Exec(ctx, `
-			UPDATE equipment
-			SET status = 'IN_USE'
-			WHERE id = $1
-		`, request.EquipmentID)
-
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"error": "Failed to update equipment status",
-			})
-		}
-
 		if err := tx.Commit(ctx); err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"error": "Failed to save equipment checkout",
-			})
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to save equipment checkout"})
 		}
-
 		return c.Status(201).JSON(transaction)
 	}
 
-	// RETURN: find and lock the active checkout session.
 	if currentStatus != "IN_USE" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Equipment is not currently in use",
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "Equipment is not currently in use"})
 	}
 
 	var transaction models.EquipmentTransaction
-
 	err = tx.QueryRow(ctx, `
 		SELECT id, equipment_id, transaction_type, researcher_id,
 		       performed_by, notes, checkout_time, created_at
@@ -239,32 +220,18 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 	)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "No active checkout session found for this equipment",
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "No active checkout session found for this equipment"})
 	}
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to find active checkout session",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to find active checkout session"})
 	}
 
-	// If the checkout has a researcher ID, require the same ID for return.
-	// Older checkout records without an ID use the name comparison.
 	if transaction.ResearcherID != nil {
-		if request.ResearcherID == nil ||
-			*request.ResearcherID != *transaction.ResearcherID {
-			return c.Status(403).JSON(fiber.Map{
-				"error": "Only the researcher who checked out this equipment can return it",
-			})
+		if request.ResearcherID == nil || *request.ResearcherID != *transaction.ResearcherID {
+			return c.Status(403).JSON(fiber.Map{"error": "Only the researcher who checked out this equipment can return it"})
 		}
-	} else if !strings.EqualFold(
-		strings.TrimSpace(transaction.PerformedBy),
-		request.PerformedBy,
-	) {
-		return c.Status(403).JSON(fiber.Map{
-			"error": "Only the researcher who checked out this equipment can return it",
-		})
+	} else if !strings.EqualFold(strings.TrimSpace(transaction.PerformedBy), request.PerformedBy) {
+		return c.Status(403).JSON(fiber.Map{"error": "Only the researcher who checked out this equipment can return it"})
 	}
 
 	_, err = tx.Exec(ctx, `
@@ -272,32 +239,30 @@ func CreateEquipmentTransaction(c fiber.Ctx) error {
 		SET return_time = $1
 		WHERE id = $2
 	`, now, transaction.ID)
-
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to record equipment return",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to record equipment return"})
 	}
 
 	_, err = tx.Exec(ctx, `
-		UPDATE equipment
-		SET status = 'AVAILABLE'
-		WHERE id = $1
+		UPDATE equipment SET status = 'AVAILABLE' WHERE id = $1
 	`, request.EquipmentID)
-
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to update equipment status",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to update equipment status"})
+	}
+
+	// Preserve the original checkout actor; record the return actor separately.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO audit_logs (actor_user_id, action, entity_type, entity_id)
+		VALUES ($1, 'EQUIPMENT_RETURN', 'equipment_transaction', $2)
+	`, actorID, transaction.ID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to record return audit event"})
 	}
 
 	transaction.ReturnTime = &now
 
 	if err := tx.Commit(ctx); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to save equipment return",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to save equipment return"})
 	}
-
 	return c.JSON(transaction)
 }

@@ -2,17 +2,19 @@ package routes
 
 import (
 	"github.com/gofiber/fiber/v3"
-
 	"labsync/backend/handlers"
+	"labsync/backend/middleware"
 )
 
-// MaterialRoutes registers all material-related API routes.
 func MaterialRoutes(app *fiber.App) {
-	api := app.Group("/api")
+	api := app.Group("/api", middleware.RequireAuth)
 
-	// Get all materials
-	api.Get("/materials", handlers.GetMaterials)
-
-	// Create a new material
-	api.Post("/materials", handlers.CreateMaterial)
+	api.Get("/materials",
+		middleware.RequirePermission("materials.read"),
+		handlers.GetMaterials,
+	)
+	api.Post("/materials",
+		middleware.RequirePermission("materials.manage"),
+		handlers.CreateMaterial,
+	)
 }

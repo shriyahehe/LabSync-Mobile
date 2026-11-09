@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/jackc/pgx/v5"
 
 	"labsync/backend/database"
 	"labsync/backend/models"
@@ -13,6 +16,16 @@ import (
 
 // POST /api/experiments/:id/records
 func CreateExperimentRecord(c fiber.Ctx) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	actorID, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
+		})
+	}
+
 	experimentID, err := strconv.Atoi(c.Params("id"))
 	if err != nil || experimentID <= 0 {
 		return c.Status(400).JSON(fiber.Map{
@@ -32,6 +45,8 @@ func CreateExperimentRecord(c fiber.Ctx) error {
 		})
 	}
 
+	input.RecordedBy = strings.TrimSpace(input.RecordedBy)
+	input.RecordType = strings.ToUpper(strings.TrimSpace(input.RecordType))
 	input.Notes = strings.TrimSpace(input.Notes)
 
 	if input.Notes == "" {
@@ -44,12 +59,49 @@ func CreateExperimentRecord(c fiber.Ctx) error {
 		input.RecordType = "OBSERVATION"
 	}
 
+	tx, err := database.DB.Begin(ctx)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to start transaction",
+		})
+	}
+	defer tx.Rollback(ctx)
+
+	var laboratoryID int
+
+	err = tx.QueryRow(ctx, `
+		SELECT laboratory_id
+		FROM experiments
+		WHERE id = $1
+		FOR SHARE
+	`, experimentID).Scan(&laboratoryID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Experiment not found",
+		})
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to verify experiment",
+		})
+	}
+
+	if !scope.AllLaboratories &&
+		!scopeAllowsLaboratory(scope, laboratoryID) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Experiment not found",
+		})
+	}
+
 	var record models.ExperimentRecord
 
-	err = database.DB.QueryRow(context.Background(), `
-		INSERT INTO experiment_records
-			(experiment_id, recorded_by, record_type, notes)
-		VALUES ($1, $2, $3, $4)
+	err = tx.QueryRow(ctx, `
+		INSERT INTO experiment_records (
+			experiment_id, recorded_by, record_type, notes, actor_user_id
+		)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, experiment_id,
 		          COALESCE(recorded_by, ''),
 		          record_type, notes, created_at
@@ -58,6 +110,7 @@ func CreateExperimentRecord(c fiber.Ctx) error {
 		input.RecordedBy,
 		input.RecordType,
 		input.Notes,
+		actorID,
 	).Scan(
 		&record.ID,
 		&record.ExperimentID,
@@ -69,7 +122,13 @@ func CreateExperimentRecord(c fiber.Ctx) error {
 
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{
-			"error": "Could not add observation. Check that the experiment exists.",
+			"error": "Could not add observation. Check the experiment and record details.",
+		})
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to save experiment record",
 		})
 	}
 
@@ -81,6 +140,16 @@ func CreateExperimentRecord(c fiber.Ctx) error {
 
 // GET /api/experiments/:id/records
 func GetExperimentRecords(c fiber.Ctx) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
+		})
+	}
+
 	experimentID, err := strconv.Atoi(c.Params("id"))
 	if err != nil || experimentID <= 0 {
 		return c.Status(400).JSON(fiber.Map{
@@ -88,13 +157,19 @@ func GetExperimentRecords(c fiber.Ctx) error {
 		})
 	}
 
-	var exists bool
+	var laboratoryID int
 
-	err = database.DB.QueryRow(context.Background(), `
-		SELECT EXISTS (
-			SELECT 1 FROM experiments WHERE id = $1
-		)
-	`, experimentID).Scan(&exists)
+	err = database.DB.QueryRow(ctx, `
+		SELECT laboratory_id
+		FROM experiments
+		WHERE id = $1
+	`, experimentID).Scan(&laboratoryID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Experiment not found",
+		})
+	}
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -102,13 +177,14 @@ func GetExperimentRecords(c fiber.Ctx) error {
 		})
 	}
 
-	if !exists {
+	if !scope.AllLaboratories &&
+		!scopeAllowsLaboratory(scope, laboratoryID) {
 		return c.Status(404).JSON(fiber.Map{
 			"error": "Experiment not found",
 		})
 	}
 
-	rows, err := database.DB.Query(context.Background(), `
+	rows, err := database.DB.Query(ctx, `
 		SELECT id, experiment_id,
 		       COALESCE(recorded_by, ''),
 		       record_type, notes, created_at
@@ -124,21 +200,19 @@ func GetExperimentRecords(c fiber.Ctx) error {
 	}
 	defer rows.Close()
 
-	records := []models.ExperimentRecord{}
+	records := make([]models.ExperimentRecord, 0)
 
 	for rows.Next() {
 		var record models.ExperimentRecord
 
-		err := rows.Scan(
+		if err := rows.Scan(
 			&record.ID,
 			&record.ExperimentID,
 			&record.RecordedBy,
 			&record.RecordType,
 			&record.Notes,
 			&record.CreatedAt,
-		)
-
-		if err != nil {
+		); err != nil {
 			return c.Status(500).JSON(fiber.Map{
 				"error": "Failed to read experiment records",
 			})

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -9,36 +10,31 @@ import (
 	"labsync/backend/models"
 )
 
-// GetMaterials returns all materials.
 func GetMaterials(c fiber.Ctx) error {
-	rows, err := database.DB.Query(
-		context.Background(),
-		`SELECT id,
-		        laboratory_id,
-		        name,
-		        category,
-		        quantity,
-		        unit,
-		        minimum_quantity,
-		        expiry_date
-		 FROM materials
-		 ORDER BY id`,
-	)
-
+	_, scope, err := requestAccessScope(c)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to fetch materials",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to determine laboratory access"})
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := database.DB.Query(ctx, `
+		SELECT id, laboratory_id, name, category, quantity, unit,
+		       minimum_quantity, expiry_date
+		FROM materials
+		WHERE $1::boolean OR laboratory_id = ANY($2::integer[])
+		ORDER BY id
+	`, scope.AllLaboratories, scope.LaboratoryIDs)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch materials"})
+	}
 	defer rows.Close()
 
-	var materials []models.Material
-
+	materials := make([]models.Material, 0)
 	for rows.Next() {
 		var material models.Material
-
-		err := rows.Scan(
+		if err := rows.Scan(
 			&material.ID,
 			&material.LaboratoryID,
 			&material.Name,
@@ -47,69 +43,46 @@ func GetMaterials(c fiber.Ctx) error {
 			&material.Unit,
 			&material.MinimumQuantity,
 			&material.ExpiryDate,
-		)
-
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"error": "Failed to read material data",
-			})
+		); err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to read material data"})
 		}
-
 		materials = append(materials, material)
 	}
 
 	if err := rows.Err(); err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed while reading materials",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed while reading materials"})
 	}
-
 	return c.JSON(materials)
 }
 
-// CreateMaterial creates a new material.
 func CreateMaterial(c fiber.Ctx) error {
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to determine laboratory access"})
+	}
+
 	var material models.Material
-
-	// Read JSON request body
 	if err := c.Bind().Body(&material); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid request body",
-		})
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
-	// Basic validation
-	if material.LaboratoryID <= 0 {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Laboratory ID is required",
-		})
+	if material.LaboratoryID <= 0 || material.Name == "" || material.Unit == "" || material.Quantity < 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Valid laboratory ID, name, unit and non-negative quantity are required"})
 	}
 
-	if material.Name == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Material name is required",
-		})
+	if !scopeAllowsLaboratory(scope, material.LaboratoryID) {
+		return laboratoryAccessDenied(c)
 	}
 
-	if material.Unit == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Material unit is required",
-		})
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	if material.Quantity < 0 {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Quantity cannot be negative",
-		})
-	}
-
-	// Insert material into PostgreSQL
-	err := database.DB.QueryRow(
-		context.Background(),
-		`INSERT INTO materials
+	err = database.DB.QueryRow(ctx, `
+		INSERT INTO materials
 			(laboratory_id, name, category, quantity, unit, minimum_quantity, expiry_date)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 RETURNING id`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id
+	`,
 		material.LaboratoryID,
 		material.Name,
 		material.Category,
@@ -120,10 +93,7 @@ func CreateMaterial(c fiber.Ctx) error {
 	).Scan(&material.ID)
 
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to create material",
-		})
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to create material"})
 	}
-
 	return c.Status(201).JSON(material)
 }

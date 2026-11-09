@@ -20,8 +20,19 @@ type ResearcherActivity struct {
 	OccurredAt   time.Time `json:"occurred_at"`
 }
 
-// GET /api/researchers/:id/activity
 func GetResearcherActivity(c fiber.Ctx) error {
+	ctx := context.Background()
+
+	// Get authenticated user and their laboratory access scope.
+	userID, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine access permissions",
+		})
+	}
+	_ = userID
+
+	// Parse researcher ID.
 	researcherID, err := strconv.Atoi(c.Params("id"))
 	if err != nil || researcherID <= 0 {
 		return c.Status(400).JSON(fiber.Map{
@@ -29,16 +40,20 @@ func GetResearcherActivity(c fiber.Ctx) error {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	var researcherExists bool
+	// Verify the researcher exists and their primary laboratory is accessible.
+	var primaryLaboratoryID int
 
 	err = database.DB.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM researchers WHERE id = $1
-		)
-	`, researcherID).Scan(&researcherExists)
+		SELECT primary_laboratory_id
+		FROM researchers
+		WHERE id = $1
+	`, researcherID).Scan(&primaryLaboratoryID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Researcher not found",
+		})
+	}
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -46,12 +61,14 @@ func GetResearcherActivity(c fiber.Ctx) error {
 		})
 	}
 
-	if !researcherExists {
+	if !scope.AllLaboratories &&
+		!scopeAllowsLaboratory(scope, primaryLaboratoryID) {
 		return c.Status(404).JSON(fiber.Map{
 			"error": "Researcher not found",
 		})
 	}
 
+	// Fetch activity only from laboratories the authenticated user can access.
 	rows, err := database.DB.Query(ctx, `
 		SELECT *
 		FROM (
@@ -76,6 +93,7 @@ func GetResearcherActivity(c fiber.Ctx) error {
 			FROM lab_entries le
 			LEFT JOIN laboratories l ON l.id = le.laboratory_id
 			WHERE le.researcher_id = $1
+			  AND ($2::boolean OR le.laboratory_id = ANY($3::integer[]))
 
 			UNION ALL
 
@@ -87,8 +105,9 @@ func GetResearcherActivity(c fiber.Ctx) error {
 					COALESCE(et.notes, ''),
 				COALESCE(et.checkout_time, et.created_at)
 			FROM equipment_transactions et
-			LEFT JOIN equipment e ON e.id = et.equipment_id
+			JOIN equipment e ON e.id = et.equipment_id
 			WHERE et.researcher_id = $1
+			  AND ($2::boolean OR e.laboratory_id = ANY($3::integer[]))
 
 			UNION ALL
 
@@ -106,8 +125,9 @@ func GetResearcherActivity(c fiber.Ctx) error {
 					END,
 				st.created_at
 			FROM sample_transactions st
-			LEFT JOIN samples s ON s.id = st.sample_id
+			JOIN samples s ON s.id = st.sample_id
 			WHERE st.researcher_id = $1
+			  AND ($2::boolean OR s.laboratory_id = ANY($3::integer[]))
 
 			UNION ALL
 
@@ -124,8 +144,9 @@ func GetResearcherActivity(c fiber.Ctx) error {
 					END,
 				it.created_at
 			FROM inventory_transactions it
-			LEFT JOIN materials m ON m.id = it.material_id
+			JOIN materials m ON m.id = it.material_id
 			WHERE it.researcher_id = $1
+			  AND ($2::boolean OR m.laboratory_id = ANY($3::integer[]))
 
 			UNION ALL
 
@@ -142,9 +163,10 @@ func GetResearcherActivity(c fiber.Ctx) error {
 				COALESCE(ex.start_time, ex.created_at)
 			FROM experiments ex
 			WHERE ex.researcher_id = $1
+			  AND ($2::boolean OR ex.laboratory_id = ANY($3::integer[]))
 		) AS activity
 		ORDER BY occurred_at DESC
-	`, researcherID)
+	`, researcherID, scope.AllLaboratories, scope.LaboratoryIDs)
 
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
@@ -174,9 +196,6 @@ func GetResearcherActivity(c fiber.Ctx) error {
 	}
 
 	if err := rows.Err(); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return c.JSON(activities)
-		}
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Error while reading researcher activity",
 		})

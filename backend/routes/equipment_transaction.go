@@ -2,23 +2,19 @@ package routes
 
 import (
 	"github.com/gofiber/fiber/v3"
-
 	"labsync/backend/handlers"
+	"labsync/backend/middleware"
 )
 
-// EquipmentTransactionRoutes registers equipment tracking routes.
 func EquipmentTransactionRoutes(app *fiber.App) {
-	api := app.Group("/api")
+	api := app.Group("/api", middleware.RequireAuth)
 
-	// Get equipment transaction history.
-	api.Get(
-		"/equipment-transactions",
+	api.Get("/equipment-transactions",
+		middleware.RequirePermission("equipment.read"),
 		handlers.GetEquipmentTransactions,
 	)
-
-	// Checkout or return equipment.
-	api.Post(
-		"/equipment-transactions",
+	api.Post("/equipment-transactions",
+		middleware.RequirePermission("equipment_transactions.manage"),
 		handlers.CreateEquipmentTransaction,
 	)
 }

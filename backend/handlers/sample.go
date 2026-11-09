@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,8 +15,13 @@ import (
 	"labsync/backend/models"
 )
 
-// GetSamples returns all samples.
+// GetSamples returns samples belonging only to accessible laboratories.
 func GetSamples(c fiber.Ctx) error {
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to determine laboratory access"})
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -24,15 +30,15 @@ func GetSamples(c fiber.Ctx) error {
 		       initial_quantity, available_quantity, unit,
 		       storage_location, created_at
 		FROM samples
+		WHERE $1::boolean OR laboratory_id = ANY($2::integer[])
 		ORDER BY created_at DESC
-	`)
+	`, scope.AllLaboratories, scope.LaboratoryIDs)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch samples"})
 	}
 	defer rows.Close()
 
 	samples := make([]models.Sample, 0)
-
 	for rows.Next() {
 		var sample models.Sample
 
@@ -61,11 +67,16 @@ func GetSamples(c fiber.Ctx) error {
 	return c.JSON(samples)
 }
 
-// GetSample returns one sample by ID.
+// GetSample returns one sample only if it belongs to an accessible laboratory.
 func GetSample(c fiber.Ctx) error {
-	id := strings.TrimSpace(c.Params("id"))
-	if id == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "Sample ID is required"})
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to determine laboratory access"})
+	}
+
+	id, err := strconv.Atoi(strings.TrimSpace(c.Params("id")))
+	if err != nil || id <= 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid sample ID"})
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -73,7 +84,7 @@ func GetSample(c fiber.Ctx) error {
 
 	var sample models.Sample
 
-	err := database.DB.QueryRow(ctx, `
+	err = database.DB.QueryRow(ctx, `
 		SELECT id, laboratory_id, name, sample_type, description,
 		       initial_quantity, available_quantity, unit,
 		       storage_location, created_at
@@ -99,11 +110,20 @@ func GetSample(c fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch sample"})
 	}
 
+	if !scopeAllowsLaboratory(scope, sample.LaboratoryID) {
+		return c.Status(404).JSON(fiber.Map{"error": "Sample not found"})
+	}
+
 	return c.JSON(sample)
 }
 
-// CreateSample adds a new sample.
+// CreateSample adds a sample to an accessible laboratory.
 func CreateSample(c fiber.Ctx) error {
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to determine laboratory access"})
+	}
+
 	var sample models.Sample
 
 	if err := c.Bind().Body(&sample); err != nil {
@@ -119,6 +139,10 @@ func CreateSample(c fiber.Ctx) error {
 		})
 	}
 
+	if !scopeAllowsLaboratory(scope, sample.LaboratoryID) {
+		return laboratoryAccessDenied(c)
+	}
+
 	if math.IsNaN(sample.InitialQuantity) ||
 		math.IsInf(sample.InitialQuantity, 0) ||
 		sample.InitialQuantity < 0 {
@@ -132,7 +156,7 @@ func CreateSample(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err := database.DB.QueryRow(ctx, `
+	err = database.DB.QueryRow(ctx, `
 		INSERT INTO samples (
 			laboratory_id, name, sample_type, description,
 			initial_quantity, available_quantity, unit, storage_location
@@ -156,17 +180,24 @@ func CreateSample(c fiber.Ctx) error {
 	return c.Status(201).JSON(sample)
 }
 
-// GetSampleTransactions returns usage/restock history.
+// GetSampleTransactions returns transaction history from accessible laboratories.
 func GetSampleTransactions(c fiber.Ctx) error {
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to determine laboratory access"})
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	rows, err := database.DB.Query(ctx, `
-		SELECT id, sample_id, transaction_type, quantity,
-		       researcher_id, performed_by, notes, created_at
-		FROM sample_transactions
-		ORDER BY created_at DESC
-	`)
+		SELECT t.id, t.sample_id, t.transaction_type, t.quantity,
+		       t.researcher_id, t.performed_by, t.notes, t.created_at
+		FROM sample_transactions t
+		JOIN samples s ON s.id = t.sample_id
+		WHERE $1::boolean OR s.laboratory_id = ANY($2::integer[])
+		ORDER BY t.created_at DESC
+	`, scope.AllLaboratories, scope.LaboratoryIDs)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to fetch sample transactions",
@@ -175,7 +206,6 @@ func GetSampleTransactions(c fiber.Ctx) error {
 	defer rows.Close()
 
 	transactions := make([]models.SampleTransaction, 0)
-
 	for rows.Next() {
 		var transaction models.SampleTransaction
 
@@ -206,8 +236,13 @@ func GetSampleTransactions(c fiber.Ctx) error {
 	return c.JSON(transactions)
 }
 
-// CreateSampleTransaction records sample usage or restocking.
+// CreateSampleTransaction records usage or restocking within an accessible laboratory.
 func CreateSampleTransaction(c fiber.Ctx) error {
+	actorID, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to determine authenticated user access"})
+	}
+
 	var transaction models.SampleTransaction
 
 	if err := c.Bind().Body(&transaction); err != nil {
@@ -244,21 +279,60 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 	}
 	defer tx.Rollback(ctx)
 
-	// Resolve the official researcher name when researcher_id is supplied.
+	// Lock the sample row and retrieve its laboratory before any stock changes.
+	var laboratoryID int
+	var currentQuantity float64
+	var initialQuantity float64
+
+	err = tx.QueryRow(ctx, `
+		SELECT laboratory_id, available_quantity, initial_quantity
+		FROM samples
+		WHERE id = $1
+		FOR UPDATE
+	`, transaction.SampleID).Scan(
+		&laboratoryID,
+		&currentQuantity,
+		&initialQuantity,
+	)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(404).JSON(fiber.Map{"error": "Sample not found"})
+	}
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to retrieve and lock sample",
+		})
+	}
+
+	if !scopeAllowsLaboratory(scope, laboratoryID) {
+		return laboratoryAccessDenied(c)
+	}
+
+	// Resolve the actual researcher, and require their association with this lab.
 	if transaction.ResearcherID != nil {
 		if *transaction.ResearcherID <= 0 {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid researcher ID"})
 		}
 
 		err = tx.QueryRow(ctx, `
-			SELECT full_name
-			FROM researchers
-			WHERE id = $1 AND status = 'ACTIVE'
-		`, *transaction.ResearcherID).Scan(&transaction.PerformedBy)
+			SELECT r.full_name
+			FROM researchers r
+			WHERE r.id = $1
+			  AND r.status = 'ACTIVE'
+			  AND (
+				r.primary_laboratory_id = $2
+				OR EXISTS (
+					SELECT 1
+					FROM researcher_laboratories rl
+					WHERE rl.researcher_id = r.id
+					  AND rl.laboratory_id = $2
+				)
+			  )
+		`, *transaction.ResearcherID, laboratoryID).Scan(&transaction.PerformedBy)
 
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.Status(404).JSON(fiber.Map{
-				"error": "Active researcher not found",
+				"error": "Active researcher not found in this laboratory",
 			})
 		}
 		if err != nil {
@@ -272,25 +346,6 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 		})
 	}
 
-	// Lock the sample row to prevent simultaneous quantity updates.
-	var currentQuantity float64
-
-	err = tx.QueryRow(ctx, `
-		SELECT available_quantity
-		FROM samples
-		WHERE id = $1
-		FOR UPDATE
-	`, transaction.SampleID).Scan(&currentQuantity)
-
-	if errors.Is(err, pgx.ErrNoRows) {
-		return c.Status(404).JSON(fiber.Map{"error": "Sample not found"})
-	}
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to read sample quantity",
-		})
-	}
-
 	newQuantity := currentQuantity
 
 	if transaction.TransactionType == "USE" {
@@ -299,23 +354,8 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 				"error": "Insufficient sample quantity",
 			})
 		}
-
 		newQuantity -= transaction.Quantity
 	} else {
-		var initialQuantity float64
-
-		err = tx.QueryRow(ctx, `
-			SELECT initial_quantity
-			FROM samples
-			WHERE id = $1
-		`, transaction.SampleID).Scan(&initialQuantity)
-
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{
-				"error": "Failed to read initial sample quantity",
-			})
-		}
-
 		newQuantity += transaction.Quantity
 
 		if math.IsInf(newQuantity, 0) || newQuantity > initialQuantity {
@@ -340,9 +380,9 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 	err = tx.QueryRow(ctx, `
 		INSERT INTO sample_transactions (
 			sample_id, transaction_type, quantity,
-			researcher_id, performed_by, notes
+			researcher_id, performed_by, notes, actor_user_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at
 	`,
 		transaction.SampleID,
@@ -351,6 +391,7 @@ func CreateSampleTransaction(c fiber.Ctx) error {
 		transaction.ResearcherID,
 		transaction.PerformedBy,
 		transaction.Notes,
+		actorID,
 	).Scan(&transaction.ID, &transaction.CreatedAt)
 
 	if err != nil {

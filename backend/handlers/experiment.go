@@ -23,7 +23,8 @@ func validExperimentStatus(status string) bool {
 	}
 }
 
-// resolveExperimentResearcher gets the official name of an active researcher.
+// resolveExperimentResearcher verifies that a linked researcher is active
+// and belongs to the experiment's laboratory.
 func resolveExperimentResearcher(
 	ctx context.Context,
 	query interface {
@@ -31,6 +32,7 @@ func resolveExperimentResearcher(
 	},
 	researcherID *int,
 	legacyName string,
+	laboratoryID int,
 ) (string, error) {
 	if researcherID == nil {
 		return strings.TrimSpace(legacyName), nil
@@ -41,15 +43,28 @@ func resolveExperimentResearcher(
 	}
 
 	var fullName string
+
 	err := query.QueryRow(ctx, `
-		SELECT full_name
-		FROM researchers
-		WHERE id = $1 AND status = 'ACTIVE'
-	`, *researcherID).Scan(&fullName)
+		SELECT r.full_name
+		FROM researchers r
+		WHERE r.id = $1
+		  AND r.status = 'ACTIVE'
+		  AND (
+			r.primary_laboratory_id = $2
+			OR EXISTS (
+				SELECT 1
+				FROM researcher_laboratories rl
+				WHERE rl.researcher_id = r.id
+				  AND rl.laboratory_id = $2
+				  AND rl.status = 'ACTIVE'
+			)
+		  )
+	`, *researcherID, laboratoryID).Scan(&fullName)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", errors.New("active researcher not found")
+		return "", errors.New("active researcher not found in the selected laboratory")
 	}
+
 	if err != nil {
 		return "", err
 	}
@@ -62,6 +77,13 @@ func GetExperiments(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
+		})
+	}
+
 	rows, err := database.DB.Query(ctx, `
 		SELECT id, laboratory_id, name,
 		       COALESCE(description, ''),
@@ -69,8 +91,10 @@ func GetExperiments(c fiber.Ctx) error {
 		       COALESCE(started_by, ''),
 		       status, start_time, end_time, created_at
 		FROM experiments
+		WHERE ($1::boolean OR laboratory_id = ANY($2::integer[]))
 		ORDER BY id DESC
-	`)
+	`, scope.AllLaboratories, scope.LaboratoryIDs)
+
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to fetch experiments",
@@ -127,6 +151,13 @@ func GetExperiment(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
+		})
+	}
+
 	var experiment models.Experiment
 
 	err = database.DB.QueryRow(ctx, `
@@ -137,7 +168,8 @@ func GetExperiment(c fiber.Ctx) error {
 		       status, start_time, end_time, created_at
 		FROM experiments
 		WHERE id = $1
-	`, id).Scan(
+		  AND ($2::boolean OR laboratory_id = ANY($3::integer[]))
+	`, id, scope.AllLaboratories, scope.LaboratoryIDs).Scan(
 		&experiment.ID,
 		&experiment.LaboratoryID,
 		&experiment.Name,
@@ -155,6 +187,7 @@ func GetExperiment(c fiber.Ctx) error {
 			"error": "Experiment not found",
 		})
 	}
+
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to fetch experiment",
@@ -168,6 +201,16 @@ func GetExperiment(c fiber.Ctx) error {
 
 // POST /api/experiments
 func CreateExperiment(c fiber.Ctx) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	actorID, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
+		})
+	}
+
 	var input struct {
 		LaboratoryID int    `json:"laboratory_id"`
 		Name         string `json:"name"`
@@ -202,20 +245,56 @@ func CreateExperiment(c fiber.Ctx) error {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	if !scope.AllLaboratories &&
+		!scopeAllowsLaboratory(scope, input.LaboratoryID) {
+		return laboratoryAccessDenied(c)
+	}
+
+	tx, err := database.DB.Begin(ctx)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to start transaction",
+		})
+	}
+	defer tx.Rollback(ctx)
+
+	var verifiedLabID int
+
+	err = tx.QueryRow(ctx, `
+		SELECT id
+		FROM laboratories
+		WHERE id = $1
+		FOR SHARE
+	`, input.LaboratoryID).Scan(&verifiedLabID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Selected laboratory does not exist",
+		})
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to verify laboratory",
+		})
+	}
 
 	startedBy, err := resolveExperimentResearcher(
 		ctx,
-		database.DB,
+		tx,
 		input.ResearcherID,
 		input.StartedBy,
+		input.LaboratoryID,
 	)
+
 	if err != nil {
-		if err.Error() == "invalid researcher ID" ||
-			err.Error() == "active researcher not found" {
-			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		if strings.Contains(err.Error(), "researcher") ||
+			err.Error() == "invalid researcher ID" {
+			return c.Status(400).JSON(fiber.Map{
+				"error": err.Error(),
+			})
 		}
+
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to verify researcher",
 		})
@@ -223,12 +302,12 @@ func CreateExperiment(c fiber.Ctx) error {
 
 	var experiment models.Experiment
 
-	err = database.DB.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO experiments (
 			laboratory_id, name, description,
-			researcher_id, started_by, status
+			researcher_id, started_by, status, actor_user_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, laboratory_id, name,
 		          COALESCE(description, ''),
 		          researcher_id,
@@ -241,6 +320,7 @@ func CreateExperiment(c fiber.Ctx) error {
 		input.ResearcherID,
 		startedBy,
 		input.Status,
+		actorID,
 	).Scan(
 		&experiment.ID,
 		&experiment.LaboratoryID,
@@ -256,7 +336,13 @@ func CreateExperiment(c fiber.Ctx) error {
 
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{
-			"error": "Could not create experiment. Check that the laboratory exists.",
+			"error": "Could not create experiment. Check the supplied details.",
+		})
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to save experiment",
 		})
 	}
 
@@ -272,6 +358,16 @@ func UpdateExperiment(c fiber.Ctx) error {
 	if err != nil || id <= 0 {
 		return c.Status(400).JSON(fiber.Map{
 			"error": "Invalid experiment ID",
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	actorID, scope, err := requestAccessScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
 		})
 	}
 
@@ -305,28 +401,96 @@ func UpdateExperiment(c fiber.Ctx) error {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	if !scope.AllLaboratories &&
+		!scopeAllowsLaboratory(scope, input.LaboratoryID) {
+		return laboratoryAccessDenied(c)
+	}
 
-	startedBy, err := resolveExperimentResearcher(
-		ctx,
-		database.DB,
-		input.ResearcherID,
-		input.StartedBy,
-	)
+	tx, err := database.DB.Begin(ctx)
 	if err != nil {
-		if err.Error() == "invalid researcher ID" ||
-			err.Error() == "active researcher not found" {
-			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
-		}
 		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to verify researcher",
+			"error": "Failed to start transaction",
 		})
+	}
+	defer tx.Rollback(ctx)
+
+	var currentLabID int
+
+	err = tx.QueryRow(ctx, `
+		SELECT laboratory_id
+		FROM experiments
+		WHERE id = $1
+		FOR UPDATE
+	`, id).Scan(&currentLabID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Experiment not found",
+		})
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to verify experiment",
+		})
+	}
+
+	if !scope.AllLaboratories &&
+		!scopeAllowsLaboratory(scope, currentLabID) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Experiment not found",
+		})
+	}
+
+	var verifiedLabID int
+
+	err = tx.QueryRow(ctx, `
+		SELECT id
+		FROM laboratories
+		WHERE id = $1
+		FOR SHARE
+	`, input.LaboratoryID).Scan(&verifiedLabID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Selected laboratory does not exist",
+		})
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to verify laboratory",
+		})
+	}
+
+	startedBy := strings.TrimSpace(input.StartedBy)
+
+	if input.ResearcherID != nil {
+		startedBy, err = resolveExperimentResearcher(
+			ctx,
+			tx,
+			input.ResearcherID,
+			input.StartedBy,
+			input.LaboratoryID,
+		)
+
+		if err != nil {
+			if strings.Contains(err.Error(), "researcher") ||
+				err.Error() == "invalid researcher ID" {
+				return c.Status(400).JSON(fiber.Map{
+					"error": err.Error(),
+				})
+			}
+
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to verify researcher",
+			})
+		}
 	}
 
 	var experiment models.Experiment
 
-	err = database.DB.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE experiments
 		SET laboratory_id = $1,
 		    name = $2,
@@ -339,8 +503,9 @@ func UpdateExperiment(c fiber.Ctx) error {
 		        WHEN $4::integer IS NOT NULL THEN $5
 		        ELSE $6
 		    END,
-		    status = COALESCE(NULLIF($7, ''), status)
-		WHERE id = $8
+		    status = COALESCE(NULLIF($7, ''), status),
+		    actor_user_id = $8
+		WHERE id = $9
 		RETURNING id, laboratory_id, name,
 		          COALESCE(description, ''),
 		          researcher_id,
@@ -354,6 +519,7 @@ func UpdateExperiment(c fiber.Ctx) error {
 		startedBy,
 		input.StartedBy,
 		input.Status,
+		actorID,
 		id,
 	).Scan(
 		&experiment.ID,
@@ -373,9 +539,16 @@ func UpdateExperiment(c fiber.Ctx) error {
 			"error": "Experiment not found",
 		})
 	}
+
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{
-			"error": "Could not update experiment. Check the laboratory ID.",
+			"error": "Could not update experiment. Check the supplied details.",
+		})
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to update experiment",
 		})
 	}
 

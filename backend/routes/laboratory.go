@@ -2,17 +2,19 @@ package routes
 
 import (
 	"github.com/gofiber/fiber/v3"
-
 	"labsync/backend/handlers"
+	"labsync/backend/middleware"
 )
 
-// LaboratoryRoutes registers all laboratory-related API routes.
 func LaboratoryRoutes(app *fiber.App) {
-	api := app.Group("/api")
+	api := app.Group("/api", middleware.RequireAuth)
 
-	// Get all laboratories
-	api.Get("/laboratories", handlers.GetLaboratories)
-
-	// Create a new laboratory
-	api.Post("/laboratories", handlers.CreateLaboratory)
+	api.Get("/laboratories",
+		middleware.RequirePermission("laboratories.read"),
+		handlers.GetLaboratories,
+	)
+	api.Post("/laboratories",
+		middleware.RequirePermission("laboratories.manage"),
+		handlers.CreateLaboratory,
+	)
 }

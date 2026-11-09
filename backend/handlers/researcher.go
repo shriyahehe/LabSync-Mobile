@@ -8,12 +8,11 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"labsync/backend/database"
 	"labsync/backend/models"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const researcherSelect = `
@@ -49,10 +48,36 @@ func scanResearcher(row pgx.Row) (models.Researcher, error) {
 	return researcher, err
 }
 
-// GetResearchers returns all researchers with optional search and filters.
+func researcherScope(c fiber.Ctx) (bool, []int, error) {
+	_, scope, err := requestAccessScope(c)
+	if err != nil {
+		return false, nil, err
+	}
+
+	return scope.AllLaboratories, scope.LaboratoryIDs, nil
+}
+
+func containsLaboratoryID(labIDs []int, target int) bool {
+	for _, id := range labIDs {
+		if id == target {
+			return true
+		}
+	}
+
+	return false
+}
+
+// GetResearchers returns only researchers in laboratories accessible to the user.
 func GetResearchers(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	allLabs, labIDs, err := researcherScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
+		})
+	}
 
 	search := strings.TrimSpace(c.Query("search"))
 	researcherType := strings.ToUpper(strings.TrimSpace(c.Query("type")))
@@ -62,19 +87,31 @@ func GetResearchers(c fiber.Ctx) error {
 	if researcherType != "" &&
 		researcherType != "RESEARCH_SCHOLAR" &&
 		researcherType != "PHD_SCHOLAR" {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid researcher type"})
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid researcher type",
+		})
 	}
 
 	if status != "" && status != "ACTIVE" && status != "INACTIVE" {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid researcher status"})
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid researcher status",
+		})
 	}
 
 	var labID *int
+
 	if laboratoryID != "" {
-		id, err := strconv.Atoi(laboratoryID)
-		if err != nil || id <= 0 {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid laboratory ID"})
+		id, parseErr := strconv.Atoi(laboratoryID)
+		if parseErr != nil || id <= 0 {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Invalid laboratory ID",
+			})
 		}
+
+		if !allLabs && !containsLaboratoryID(labIDs, id) {
+			return laboratoryAccessDenied(c)
+		}
+
 		labID = &id
 	}
 
@@ -85,45 +122,62 @@ func GetResearchers(c fiber.Ctx) error {
 		       r.joining_date::text, r.status, r.created_at, r.updated_at
 		FROM researchers r
 		JOIN laboratories l ON l.id = r.primary_laboratory_id
-		WHERE ($1 = '' OR r.full_name ILIKE '%' || $1 || '%'
-		       OR r.researcher_code ILIKE '%' || $1 || '%'
-		       OR COALESCE(r.email, '') ILIKE '%' || $1 || '%')
-		  AND ($2 = '' OR r.researcher_type = $2)
-		  AND ($3 = '' OR r.status = $3)
-		  AND ($4::integer IS NULL OR r.primary_laboratory_id = $4)
+		WHERE ($1::boolean OR r.primary_laboratory_id = ANY($2::integer[]))
+		  AND ($3 = '' OR r.full_name ILIKE '%' || $3 || '%'
+		       OR r.researcher_code ILIKE '%' || $3 || '%'
+		       OR COALESCE(r.email, '') ILIKE '%' || $3 || '%')
+		  AND ($4 = '' OR r.researcher_type = $4)
+		  AND ($5 = '' OR r.status = $5)
+		  AND ($6::integer IS NULL OR r.primary_laboratory_id = $6)
 		ORDER BY r.created_at DESC, r.id DESC
-	`, search, researcherType, status, labID)
+	`, allLabs, labIDs, search, researcherType, status, labID)
 
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch researchers"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to fetch researchers",
+		})
 	}
 	defer rows.Close()
 
 	researchers := make([]models.Researcher, 0)
 
 	for rows.Next() {
-		researcher, err := scanResearcher(rows)
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": "Failed to read researcher data"})
+		researcher, scanErr := scanResearcher(rows)
+		if scanErr != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to read researcher data",
+			})
 		}
+
 		researchers = append(researchers, researcher)
 	}
 
 	if err := rows.Err(); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed while reading researchers"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed while reading researchers",
+		})
 	}
 
 	return c.JSON(researchers)
 }
 
-// GetResearcher returns one researcher by ID.
+// GetResearcher returns one researcher if their primary laboratory is accessible.
 func GetResearcher(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil || id <= 0 {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid researcher ID"})
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid researcher ID",
+		})
+	}
+
+	allLabs, labIDs, err := researcherScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
+		})
 	}
 
 	researcher, err := scanResearcher(database.DB.QueryRow(
@@ -133,10 +187,21 @@ func GetResearcher(c fiber.Ctx) error {
 	))
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return c.Status(404).JSON(fiber.Map{"error": "Researcher not found"})
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Researcher not found",
+		})
 	}
+
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch researcher"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to fetch researcher",
+		})
+	}
+
+	if !allLabs && !containsLaboratoryID(labIDs, researcher.PrimaryLaboratoryID) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Researcher not found",
+		})
 	}
 
 	return c.JSON(researcher)
@@ -178,12 +243,14 @@ func validateResearcher(input *researcherInput) error {
 	if input.Status == "" {
 		input.Status = "ACTIVE"
 	}
+
 	if input.Status != "ACTIVE" && input.Status != "INACTIVE" {
 		return errors.New("status must be ACTIVE or INACTIVE")
 	}
 
 	if input.Email != nil {
 		value := strings.TrimSpace(*input.Email)
+
 		if value == "" {
 			input.Email = nil
 		} else {
@@ -193,6 +260,7 @@ func validateResearcher(input *researcherInput) error {
 
 	if input.Phone != nil {
 		value := strings.TrimSpace(*input.Phone)
+
 		if value == "" {
 			input.Phone = nil
 		} else {
@@ -202,6 +270,7 @@ func validateResearcher(input *researcherInput) error {
 
 	if input.JoiningDate != nil {
 		value := strings.TrimSpace(*input.JoiningDate)
+
 		if value == "" {
 			input.JoiningDate = nil
 		} else if _, err := time.Parse("2006-01-02", value); err != nil {
@@ -216,6 +285,7 @@ func validateResearcher(input *researcherInput) error {
 
 func researcherDBError(err error) error {
 	var pgErr *pgconn.PgError
+
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case "23505":
@@ -224,28 +294,68 @@ func researcherDBError(err error) error {
 			return errors.New("selected laboratory does not exist")
 		}
 	}
+
 	return err
 }
 
-// CreateResearcher creates a researcher and their primary lab record.
+// CreateResearcher creates a researcher only in an accessible laboratory.
 func CreateResearcher(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	allLabs, labIDs, err := researcherScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
+		})
+	}
+
 	var input researcherInput
+
 	if err := c.Bind().Body(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
 	}
 
 	if err := validateResearcher(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(400).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	if !allLabs && !containsLaboratoryID(labIDs, input.PrimaryLaboratoryID) {
+		return laboratoryAccessDenied(c)
 	}
 
 	tx, err := database.DB.Begin(ctx)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to start transaction"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to start transaction",
+		})
 	}
 	defer tx.Rollback(ctx)
+
+	var verifiedLabID int
+
+	err = tx.QueryRow(ctx, `
+		SELECT id
+		FROM laboratories
+		WHERE id = $1
+		FOR SHARE
+	`, input.PrimaryLaboratoryID).Scan(&verifiedLabID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Selected laboratory does not exist",
+		})
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to verify laboratory",
+		})
+	}
 
 	var researcherID int
 
@@ -273,7 +383,10 @@ func CreateResearcher(c fiber.Ctx) error {
 
 	if err != nil {
 		err = researcherDBError(err)
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+
+		return c.Status(400).JSON(fiber.Map{
+			"error": err.Error(),
+		})
 	}
 
 	_, err = tx.Exec(ctx, `
@@ -284,11 +397,15 @@ func CreateResearcher(c fiber.Ctx) error {
 	`, researcherID, input.PrimaryLaboratoryID)
 
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to save primary laboratory"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to save primary laboratory",
+		})
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to save researcher"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to save researcher",
+		})
 	}
 
 	researcher, err := scanResearcher(database.DB.QueryRow(
@@ -296,39 +413,111 @@ func CreateResearcher(c fiber.Ctx) error {
 		researcherSelect+` WHERE r.id = $1`,
 		researcherID,
 	))
+
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Researcher created but failed to fetch response"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Researcher created but failed to fetch response",
+		})
 	}
 
 	return c.Status(201).JSON(researcher)
 }
 
-// UpdateResearcher updates an existing researcher profile.
+// UpdateResearcher updates a researcher only when their current and new
+// primary laboratories are both accessible to the authenticated user.
 func UpdateResearcher(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil || id <= 0 {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid researcher ID"})
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid researcher ID",
+		})
+	}
+
+	allLabs, labIDs, err := researcherScope(c)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to determine laboratory access",
+		})
 	}
 
 	var input researcherInput
+
 	if err := c.Bind().Body(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
 	}
 
 	if err := validateResearcher(&input); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return c.Status(400).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	if !allLabs && !containsLaboratoryID(labIDs, input.PrimaryLaboratoryID) {
+		return laboratoryAccessDenied(c)
 	}
 
 	tx, err := database.DB.Begin(ctx)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to start transaction"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to start transaction",
+		})
 	}
 	defer tx.Rollback(ctx)
 
-	command, err := tx.Exec(ctx, `
+	var currentLabID int
+
+	err = tx.QueryRow(ctx, `
+		SELECT primary_laboratory_id
+		FROM researchers
+		WHERE id = $1
+		FOR UPDATE
+	`, id).Scan(&currentLabID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Researcher not found",
+		})
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to verify researcher",
+		})
+	}
+
+	if !allLabs && !containsLaboratoryID(labIDs, currentLabID) {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Researcher not found",
+		})
+	}
+
+	var verifiedLabID int
+
+	err = tx.QueryRow(ctx, `
+		SELECT id
+		FROM laboratories
+		WHERE id = $1
+		FOR SHARE
+	`, input.PrimaryLaboratoryID).Scan(&verifiedLabID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Selected laboratory does not exist",
+		})
+	}
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to verify laboratory",
+		})
+	}
+
+	_, err = tx.Exec(ctx, `
 		UPDATE researchers
 		SET researcher_code = $1,
 		    full_name = $2,
@@ -360,26 +549,36 @@ func UpdateResearcher(c fiber.Ctx) error {
 
 	if err != nil {
 		err = researcherDBError(err)
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+
+		return c.Status(400).JSON(fiber.Map{
+			"error": err.Error(),
+		})
 	}
 
-	if command.RowsAffected() == 0 {
-		return c.Status(404).JSON(fiber.Map{"error": "Researcher not found"})
-	}
-
-	// Keep the single primary laboratory assignment in sync.
-	_, err = tx.Exec(ctx, `
+	command, err := tx.Exec(ctx, `
 		UPDATE researcher_laboratories
-		SET laboratory_id = $1, assigned_at = CURRENT_TIMESTAMP, status = 'ACTIVE'
+		SET laboratory_id = $1,
+		    assigned_at = CURRENT_TIMESTAMP,
+		    status = 'ACTIVE'
 		WHERE researcher_id = $2 AND is_primary = TRUE
 	`, input.PrimaryLaboratoryID, id)
 
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to update primary laboratory"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to update primary laboratory",
+		})
+	}
+
+	if command.RowsAffected() == 0 {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Primary laboratory assignment was not found",
+		})
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Failed to update researcher"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to update researcher",
+		})
 	}
 
 	researcher, err := scanResearcher(database.DB.QueryRow(
@@ -387,8 +586,11 @@ func UpdateResearcher(c fiber.Ctx) error {
 		researcherSelect+` WHERE r.id = $1`,
 		id,
 	))
+
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "Researcher updated but failed to fetch response"})
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Researcher updated but failed to fetch response",
+		})
 	}
 
 	return c.JSON(researcher)

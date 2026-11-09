@@ -28,6 +28,9 @@ func main() {
 	app := fiber.New()
 
 	// Register API routes.
+	// Register authentication routes.
+	routes.AuthRoutes(app)
+
 	routes.LaboratoryRoutes(app)
 	routes.MaterialRoutes(app)
 	routes.InventoryTransactionRoutes(app)
